@@ -84,9 +84,10 @@ async function selfTest({ bins }) {
     const enc = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest'];
     await exec(ffmpeg, ['-loglevel', 'error', '-y', ...src, ...enc, path.join(site, 'clip.mp4')]);
     fs.mkdirSync(path.join(site, 'hls'));
-    await exec(ffmpeg, ['-loglevel', 'error', '-y', '-i', path.join(site, 'clip.mp4'), '-c', 'copy', '-f', 'hls', '-hls_time', '1', '-hls_playlist_type', 'vod', path.join(site, 'hls', 'index.m3u8')]);
+    await exec(ffmpeg, ['-loglevel', 'error', '-y', '-i', path.join(site, 'clip.mp4'), '-c', 'copy', '-f', 'hls', '-hls_time', '1', '-hls_playlist_type', 'vod', 'index.m3u8'], { cwd: path.join(site, 'hls') });
     fs.mkdirSync(path.join(site, 'dash'));
-    await exec(ffmpeg, ['-loglevel', 'error', '-y', '-i', path.join(site, 'clip.mp4'), '-map', '0:v', '-map', '0:a', '-c', 'copy', '-f', 'dash', '-seg_duration', '1', path.join(site, 'dash', 'manifest.mpd')]);
+    // ffmpeg's DASH writer mishandles Windows paths (pieces land in the working folder), so run it from inside the folder.
+    await exec(ffmpeg, ['-loglevel', 'error', '-y', '-i', path.join(site, 'clip.mp4'), '-map', '0:v', '-map', '0:a', '-c', 'copy', '-f', 'dash', '-seg_duration', '1', 'manifest.mpd'], { cwd: path.join(site, 'dash') });
 
     server = await serve(site);
     const base = `http://127.0.0.1:${server.address().port}`;
