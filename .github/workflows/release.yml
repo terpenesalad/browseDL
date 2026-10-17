@@ -73,7 +73,14 @@ jobs:
           fi
           code=$?
           echo "----- self-test log -----"
-          cat "$BROWSEDL_SELFTEST_LOG" || true
+          cat "$BROWSEDL_SELFTEST_LOG" || echo "(no log written)"
+          if [ $code -ne 0 ]; then
+            # Also surface the log as annotations, which show on the run's summary page.
+            echo "::error::Self-test exited with code $code"
+            if [ -f "$BROWSEDL_SELFTEST_LOG" ]; then
+              grep -v "^ok " "$BROWSEDL_SELFTEST_LOG" | head -c 6000 | while IFS= read -r line; do echo "::error::${line//%/%25}"; done
+            fi
+          fi
           exit $code
       - uses: actions/upload-artifact@v4
         with:
