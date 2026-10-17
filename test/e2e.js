@@ -167,10 +167,25 @@ function screen(name) {
     await win.click('.nav[data-view="browse"]');
     await waitFor(async () => /Linked show pages \(2\)/.test(await win.textContent('#catch-list')), 'linked show pages', 60000);
     const linkedTitles = await win.$$eval('#catch-list .pick .title', (els) => els.map((e) => e.textContent));
-    assert.ok(linkedTitles.includes('Owls at midnight – Recorded 2024'), `linked titles: ${linkedTitles}`);
+    assert.ok(linkedTitles.includes('Owls at midnight'), `linked titles: ${linkedTitles}`);
+    assert.match(await win.textContent('#catch-list'), /Recorded 2024/, 'the rest of the card shows as detail');
     assert.equal(await win.textContent('#catch-go'), 'Download', 'linked pages start unticked');
+    // The filter narrows the list (accents don't matter), and Tick all only ticks what's shown.
+    await win.fill('#catch-filter', 'dvorak serenade');
+    await waitFor(async () => /Linked show pages \(1 of 2\)/.test(await win.textContent('#catch-list')), 'filtered to one linked page');
+    assert.deepEqual(await win.$$eval('#catch-list .pick .title', (els) => els.map((e) => e.textContent)), ["Foxes at dawn: Dvořák's Serenade"]);
     await win.locator('.group', { hasText: 'Linked show pages' }).locator('[data-all]').click();
-    assert.equal(await win.textContent('#catch-go'), 'Download 2');
+    assert.equal(await win.textContent('#catch-go'), 'Download 1');
+    await win.fill('#catch-filter', 'OWLS');
+    await waitFor(async () => !(await win.isHidden('#catch-hidden')), 'note about ticked items hidden by the filter');
+    assert.match(await win.textContent('#catch-hidden'), /1 ticked item is hidden/);
+    if (SHOTS) screen('filter');
+    await win.locator('.group', { hasText: 'Linked show pages' }).locator('[data-all]').click();
+    assert.equal(await win.textContent('#catch-go'), 'Download 2', 'ticks from both searches add up');
+    await win.fill('#catch-filter', 'nothing like this');
+    await waitFor(async () => /Nothing matches/.test(await win.textContent('#catch-list')), 'no-match message');
+    await win.press('#catch-filter', 'Escape');
+    assert.equal(await win.inputValue('#catch-filter'), '');
     // Pick the folder through "Choose a folder…", answering the system folder dialog for the test.
     await app.evaluate(({ dialog }, dir) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });

@@ -45,6 +45,8 @@ As a page loads, browseDL lists everything it can save:
 - **Links to media files** on the page, like a list of podcast episodes or lecture recordings.
 - **Linked video pages**: on a listing page (a season, search results, an artist's page), browseDL checks the page's links and lists the ones that lead to videos yt-dlp can download, grouped by kind, e.g. *Linked concert pages (24)*. These start unticked; press **Tick all** to grab the lot without opening each one. A linked page with several videos (a concert with several works, a playlist) is saved into a folder of its own, numbered in order.
 
+Long lists can be narrowed with the **filter box** at the top of the panel: type a conductor, composer, year or anything in the title, e.g. `rattle mahler`. Every word has to match, and accents don't matter (`dvorak` finds *Dvořák*). **Tick all** then ticks just the matches, and ticks from earlier searches are kept, so you can search for one conductor, tick all, then search for another.
+
 Everything else is ticked except things you've already downloaded. Untick what you don't want (**Untick all** / **Tick all** work per section), then choose:
 
 - **Folder**: the collection folder name (starts as the page or playlist title)

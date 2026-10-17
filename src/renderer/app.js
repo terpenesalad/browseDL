@@ -65,7 +65,7 @@ function nameFromUrl(url) {
 }
 // Names like "index" or a long hash say nothing; the page title is better then.
 function isGenericName(n) {
-  return !n || n.length < 2 || /^(index|master|manifest|playlist|chunklist|video|audio|media|stream|file|download|play|source|output|default|main|hls|dash)$/i.test(n) ||
+  return !n || n.length < 2 || /^(index|master|manifest|playlist|chunklist|video|audio|media|stream|file|download|play|source|output|default|main|hls|dash)([-_.].*)?$/i.test(n) ||
     /^[0-9a-f-]{16,}$/i.test(n) || /^\d+$/.test(n);
 }
 /** What a caught item is called in the list, and the file name it's saved under. */
@@ -246,6 +246,29 @@ function catchRows() {
   return rows;
 }
 
+// ---------- filtering the panel ----------
+
+/** Lower-case, without accents, so "dvorak" finds "Dvořák" and "olafsson" finds "Ólafsson". */
+function fold(text) {
+  return String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[øØ]/g, 'o').replace(/[łŁ]/g, 'l').replace(/ß/g, 'ss').replace(/[æÆ]/g, 'ae').replace(/[œŒ]/g, 'oe')
+    .replace(/[\u2018\u2019\u201c\u201d"']/g, '').toLowerCase();
+}
+function rowText(r) {
+  if (r.type === 'entry') return `${r.e.title} ${r.e.uploader || ''}`;
+  if (r.type === 'linked') return `${r.l.title || ''} ${r.l.detail || ''} ${r.l.url}`;
+  return `${itemName(r.x, S.media && S.media.pageTitle)} ${r.x.label || ''} ${r.x.url}`;
+}
+function filterWords() {
+  return fold($('#catch-filter').value).split(/\s+/).filter(Boolean);
+}
+/** The rows the filter lets through (every word has to appear somewhere). */
+function visibleRows(rows = catchRows()) {
+  const words = filterWords();
+  if (!words.length) return rows;
+  return rows.filter((r) => { const t = fold(rowText(r)); return words.every((w) => t.includes(w)); });
+}
+
 // Works of one list can share a URL, so they're told apart by their position.
 function entryId(e) {
   return e.playlistItem ? `${e.url}#${e.playlistItem}` : e.url;
@@ -272,10 +295,14 @@ function renderCatch() {
     S.picks.clear();
     S.picksPage = m.pageUrl;
     S.sublist = null;
+    $('#catch-filter').value = '';
   }
   $('#catch-title').textContent = S.sublist ? S.sublist.title || 'List' : 'Found on this page';
   $('#catch-site').textContent = m.site || '';
-  const rows = catchRows();
+  const allRows = catchRows();
+  const rows = visibleRows(allRows);
+  const filtering = filterWords().length > 0;
+  $('#catch-filter-wrap').hidden = allRows.length < 4 && !filtering;
   const folder = $('#catch-folder');
   if (document.activeElement !== folder) folder.value = defaultFolder();
 
@@ -306,12 +333,15 @@ function renderCatch() {
     }
     for (const [gi, list] of byGroup) {
       const label = list[0].label;
-      html += groupHtml(`Linked ${label} pages (${list.length})`, list, `linked:${gi}`,
+      const total = allRows.filter((r) => r.type === 'linked' && r.group === gi).length;
+      html += groupHtml(`Linked ${label} pages (${filtering ? `${list.length} of ${total}` : list.length})`, list, `linked:${gi}`,
         'Each one is a page with its own videos. Tick the ones you want; a page with several works saves them into a folder of its own.');
     }
     const linkedState = m.linked || {};
     if (linkedState.status === 'checking') html += `<div class="scanning"><span class="spinner"></span>Checking the links on this page…</div>`;
-    if (!entries.length && !caught.length && !linked.length && scan.status !== 'scanning' && linkedState.status !== 'checking') {
+    if (filtering && !rows.length && allRows.length) {
+      html += `<div class="catch-empty"><h3>Nothing matches “${esc($('#catch-filter').value.trim())}”</h3><p>Every word you type has to appear in the title. Try fewer words.</p></div>`;
+    } else if (!entries.length && !caught.length && !linked.length && scan.status !== 'scanning' && linkedState.status !== 'checking') {
       html += `<div class="catch-empty">
         <h3>Nothing found yet</h3>
         <p>Press play on a video or song and it'll show up here as it loads. Pages with links to audio or video files list them too.</p>
@@ -321,11 +351,17 @@ function renderCatch() {
   }
   list.innerHTML = html;
   for (const img of $$('img', list)) img.onerror = () => { img.remove(); };
-  const n = rows.filter((r) => r.on).length;
+  const n = allRows.filter((r) => r.on).length;
   const go = $('#catch-go');
   go.disabled = !n;
   go.textContent = n ? `Download ${n}` : 'Download';
-  $('#catch-foot').hidden = !rows.length;
+  $('#catch-foot').hidden = !allRows.length;
+  // Ticks survive a new search, so say when some ticked items aren't in view.
+  const shown = new Set(rows.map((r) => r.key));
+  const hidden = allRows.filter((r) => r.on && !shown.has(r.key)).length;
+  const note = $('#catch-hidden');
+  note.hidden = !hidden;
+  note.innerHTML = hidden ? `${hidden} ticked item${hidden === 1 ? ' is' : 's are'} hidden by the filter and will download too. <button class="btn quiet" id="catch-untick-hidden">Untick ${hidden === 1 ? 'it' : 'them'}</button>` : '';
 }
 
 function groupHtml(label, rows, type, note) {
@@ -348,7 +384,7 @@ function rowHtml(r) {
       <input type="checkbox" ${r.on ? 'checked' : ''}>
       <div class="thumb">${icon('link')}</div>
       <div class="body"><div class="title">${esc(l.title || path)}</div>
-        <div class="meta">${r.done ? '<span class="tag done">Downloaded</span>' : ''}<span class="url">${esc(path)}</span></div></div>
+        <div class="meta">${r.done ? '<span class="tag done">Downloaded</span>' : ''}${l.detail ? `<span>${esc(l.detail)}</span>` : `<span class="url">${esc(path)}</span>`}</div></div>
     </label>`;
   }
   if (r.type === 'entry') {
@@ -404,7 +440,7 @@ $('#catch-list').addEventListener('click', async (e) => {
   if (all) {
     const on = all.dataset.on === '1';
     const [type, group] = all.dataset.all.split(':');
-    for (const r of catchRows()) {
+    for (const r of visibleRows()) {
       if (r.type === type && !r.blocked && (group === undefined || String(r.group) === group)) S.picks.set(r.key, on);
     }
     renderCatch();
@@ -432,6 +468,16 @@ async function openSublist(url, title) {
   renderCatch();
 }
 
+$('#catch-filter').addEventListener('input', () => renderCatch());
+$('#catch-filter').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.target.value = ''; renderCatch(); }
+});
+$('#catch-hidden').addEventListener('click', (e) => {
+  if (!e.target.closest('#catch-untick-hidden')) return;
+  const shown = new Set(visibleRows().map((r) => r.key));
+  for (const r of catchRows()) if (r.on && !shown.has(r.key)) S.picks.set(r.key, false);
+  renderCatch();
+});
 $('#catch-folder').addEventListener('input', () => {
   if (S.media) S.folderEdits.set(S.media.pageUrl, $('#catch-folder').value);
 });

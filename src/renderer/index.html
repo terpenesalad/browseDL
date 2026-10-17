@@ -80,6 +80,10 @@
             </div>
             <button class="btn quiet icon" id="catch-rescan" title="Look again"><svg class="i"><use href="#i-reload"/></svg></button>
           </div>
+          <div class="catch-filter" id="catch-filter-wrap" hidden>
+            <label class="sr" for="catch-filter">Filter what's listed</label>
+            <input class="field" id="catch-filter" type="search" spellcheck="false" autocomplete="off" placeholder="Filter, e.g. Rattle or Mahler 2019">
+          </div>
           <div class="catch-list" id="catch-list"></div>
           <div class="catch-foot" id="catch-foot">
             <div class="row">
@@ -94,6 +98,7 @@
               <label class="lbl" for="catch-dir">Save in</label>
               <select class="field savein" id="catch-dir"></select>
             </div>
+            <div class="catch-note" id="catch-hidden" hidden></div>
             <button class="btn catch go" id="catch-go" disabled>Download</button>
           </div>
         </aside>

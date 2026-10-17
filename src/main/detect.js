@@ -225,10 +225,13 @@ const PAGE_SCAN_SCRIPT = `(() => {
     if (!/\\.(mp4|m4v|webm|mov|mkv|avi|flv|ogv|3gp|wmv|mpg|mpeg|mp3|m4a|aac|ogg|oga|opus|flac|wav|weba|wma|aiff|aif|mka|m4b|m3u8|mpd)([?#]|$)/i.test(u)) {
       // Links to other pages on this site, which may be video pages (checked later with yt-dlp).
       if (out.pages.length < 600) {
-        const lines = (a.innerText || '').split('\\n').map((l) => l.replace(/\\s+/g, ' ').trim()).filter(Boolean);
+        const lines = (a.innerText || '').split('\\n').map((l) => l.replace(/\\s+/g, ' ').trim()).filter((l) => l && l.length <= 200).slice(0, 6);
         const img = a.querySelector('img[alt]');
-        const text = lines.slice(0, 2).join(' – ') || a.getAttribute('title') || a.getAttribute('aria-label') || (img && img.alt) || '';
-        out.pages.push({ url: u, text: text.slice(0, 200) || null });
+        // Cards often read "CONCERT / 31 Aug 2016 / Simon Rattle conducts …": the longest line is the title.
+        const best = lines.reduce((m, l) => (l.length > m.length ? l : m), '');
+        const text = best || a.getAttribute('title') || a.getAttribute('aria-label') || (img && img.alt) || '';
+        const detail = lines.filter((l) => l !== best).slice(0, 3).join('  ');
+        out.pages.push({ url: u, text: text.slice(0, 200) || null, detail: detail || null });
       }
       continue;
     }
@@ -271,6 +274,7 @@ function groupLinks(links, pageUrl, { maxGroups = 15 } = {}) {
       const g = groups.get(pattern);
       const existing = g && g.links.find((x) => x.url === href);
       if (existing && !existing.title && l.text) existing.title = l.text;
+      if (existing && !existing.detail && l.detail) existing.detail = l.detail;
       continue;
     }
     seen.add(href);
@@ -278,7 +282,7 @@ function groupLinks(links, pageUrl, { maxGroups = 15 } = {}) {
       const named = [...segs].reverse().find((s, i) => (i > 0 || keys.length) && !/\d{2,}/.test(s) && !/^[a-z]{2}(-[a-z]{2})?$/i.test(s));
       groups.set(pattern, { pattern, label: (named || (keys.length ? segs[segs.length - 1] : null) || bare(page.hostname)).replace(/[-_]+/g, ' '), links: [] });
     }
-    groups.get(pattern).links.push({ url: href, title: l.text || null });
+    groups.get(pattern).links.push({ url: href, title: l.text || null, detail: l.detail || null });
   }
   return [...groups.values()].sort((a, b) => b.links.length - a.links.length).slice(0, maxGroups);
 }

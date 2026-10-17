@@ -56,7 +56,7 @@ function start(dir, port = 0) {
         </ul>
         <h2>From the archive</h2><ul>
           <li><a href="/show/101">Owls at midnight<br><small>Recorded 2024</small></a></li>
-          <li><a href="/show/102">Foxes at dawn</a></li>
+          <li><a href="/show/102">Foxes at dawn: Dvořák's Serenade</a></li>
         </ul>`));
       return;
     }

@@ -362,6 +362,8 @@ class Browser extends EventEmitter {
         const p = D.parseM3u8(text, item.url);
         item.drm = p.drm;
         if (p.duration) item.duration = p.duration;
+        // A playlist of one quality only; hidden when its main playlist is listed too.
+        if (!p.master) item.variant = true;
         if (p.master) {
           item.master = true;
           const heights = p.variants.map((v) => v.height).filter(Boolean);
@@ -384,8 +386,11 @@ class Browser extends EventEmitter {
 
   _visibleMedia(tab) {
     const minBytes = (Number(this.settings().minSizeKB) || 0) * 1024;
+    const dir = (u) => { try { const x = new URL(u); return x.origin + x.pathname.replace(/[^/]*$/, ''); } catch { return u; } };
+    const masterDirs = [...tab.media.values()].filter((m) => m.master).map((m) => dir(m.url));
     return [...tab.media.values()].filter((m) => {
       if (tab.children.has(m.key)) return false;
+      if (m.variant && masterDirs.some((d) => dir(m.url).startsWith(d))) return false;
       if (m.kind === 'file' && m.size != null && m.size < minBytes) return false;
       return true;
     });
