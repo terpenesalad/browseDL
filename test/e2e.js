@@ -41,7 +41,7 @@ function screen(name) {
   const base = `http://127.0.0.1:${server.address().port}`;
   fs.mkdirSync(userData, { recursive: true });
   const elsewhere = path.join(tmp, 'Elsewhere – “chosen”');
-  fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ downloadDir: downloads, homePage: `${base}/`, concurrency: 3, minSizeKB: 0, recentDirs: [elsewhere] }));
+  fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ downloadDir: downloads, homePage: `${base}/`, concurrency: 3, minSizeKB: 0 }));
 
   const app = await electron.launch({
     cwd: ROOT,
@@ -171,7 +171,13 @@ function screen(name) {
     assert.equal(await win.textContent('#catch-go'), 'Download', 'linked pages start unticked');
     await win.locator('.group', { hasText: 'Linked show pages' }).locator('[data-all]').click();
     assert.equal(await win.textContent('#catch-go'), 'Download 2');
-    await win.selectOption('#catch-dir', elsewhere);
+    // Pick the folder through "Choose a folder…", answering the system folder dialog for the test.
+    await app.evaluate(({ dialog }, dir) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
+    }, elsewhere);
+    await win.selectOption('#catch-dir', { label: 'Choose a folder…' });
+    await waitFor(async () => (await win.$eval('#catch-dir', (el) => el.value)) === elsewhere, 'the chosen folder selected');
+    assert.ok(await win.$eval('#addlinks-dir', (el) => [...el.options].some((o) => o.value === el.ownerDocument.querySelector('#catch-dir').value)), 'chosen folder offered in Add links too');
     if (SHOTS) screen('linked');
     await win.click('#catch-go');
     await win.click('.nav[data-view="queue"]');

@@ -473,7 +473,7 @@ $('#catch-go').onclick = async () => {
 
 // ---------- where downloads go ----------
 
-const CHOOSE = '\u0000choose';
+const CHOOSE = '__choose_folder__';
 function shortDir(d) {
   const parts = String(d).split(/[\\/]/).filter(Boolean);
   return parts.length > 2 ? `…${S.platform === 'win32' ? '\\' : '/'}${parts.slice(-2).join(S.platform === 'win32' ? '\\' : '/')}` : d;
