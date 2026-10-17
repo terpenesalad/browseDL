@@ -1,0 +1,97 @@
+{
+  "name": "browsedl",
+  "productName": "browseDL",
+  "version": "1.0.0",
+  "description": "Log in to sites in a built-in browser, catch the audio and video you find, and download it all through one organised queue.",
+  "main": "src/main/main.js",
+  "author": "terpenesalad",
+  "homepage": "https://github.com/terpenesalad/browseDL",
+  "repository": "github:terpenesalad/browseDL",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "fetch-binaries": "node scripts/fetch-binaries.mjs",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "playwright-core": "^1.64.1"
+  },
+  "build": {
+    "appId": "io.github.terpenesalad.browsedl",
+    "productName": "browseDL",
+    "artifactName": "browseDL-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/bin/${platform}-${arch}",
+        "to": "bin"
+      }
+    ],
+    "asar": true,
+    "compression": "maximum",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "artifactName": "browseDL-macos-arm64.${ext}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "browseDL-windows-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "browseDL-windows-portable.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "AudioVideo",
+      "artifactName": "browseDL-linux.${ext}"
+    }
+  }
+}

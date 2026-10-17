@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: http: data:; style-src 'self'; script-src 'self'; font-src 'self'">
+<title>browseDL</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<svg class="sprite" aria-hidden="true">
+  <defs>
+    <symbol id="i-browse" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.5 3.9 5.5 3.9 9s-1.3 6.5-3.9 9c-2.6-2.5-3.9-5.5-3.9-9S9.4 5.5 12 3z"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><path d="M12 3v10m-4-4 4 4 4-4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M3 7.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-forward" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+    <symbol id="i-reload" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-net" viewBox="0 0 24 24"><path d="M4 5h16l-3 8H7z"/><path d="M8 5l2 8M12 5v8M16 5l-2 8M5.5 9h13"/><path d="M12 15v5m-2.5-2.5L12 20l2.5-2.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9M20 4v5h-5M20 12a8 8 0 0 1-13.7 5.6L4 15M4 20v-5h5"/></symbol>
+    <symbol id="i-top" viewBox="0 0 24 24"><path d="M5 4h14M12 20V8m-5 5 5-5 5 5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5m-2.5-2.5L12 16l2.5-2.5" /></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4.5h6V7M6 7l1 13h10l1-13"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3"/></symbol>
+    <symbol id="i-audio" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></symbol>
+    <symbol id="i-stream" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/><path d="M18 15l3 2-3 2z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></symbol>
+    <symbol id="i-move" viewBox="0 0 24 24"><path d="M3 7.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h6m-2-2.5 2.5 2.5L13 15.5"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <nav class="rail" aria-label="Screens">
+    <div class="brand" title="browseDL">
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <rect x="3" y="5" width="34" height="27" rx="6" fill="none" stroke="currentColor" stroke-width="3"/>
+        <path d="M3 12h34" stroke="currentColor" stroke-width="3"/>
+        <path d="M20 16v12m-5.5-5.5L20 28l5.5-5.5" fill="none" stroke="#f2a531" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M11 36h18" stroke="#f2a531" stroke-width="3.4" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <button class="nav" data-view="browse" aria-current="page"><svg class="i"><use href="#i-browse"/></svg>Browse</button>
+    <button class="nav" data-view="queue"><svg class="i"><use href="#i-queue"/></svg>Queue<span class="badge" id="queue-badge" hidden></span></button>
+    <button class="nav" data-view="library"><svg class="i"><use href="#i-library"/></svg>Library</button>
+    <div class="spacer"></div>
+    <button class="nav" data-view="settings"><svg class="i"><use href="#i-settings"/></svg>Settings</button>
+  </nav>
+
+  <main>
+    <!-- Browse -->
+    <section class="view" id="view-browse" aria-label="Browse">
+      <div class="tabstrip" role="tablist" id="tabs"></div>
+      <div class="toolbar">
+        <button class="btn quiet icon" id="nav-back" title="Back"><svg class="i"><use href="#i-back"/></svg></button>
+        <button class="btn quiet icon" id="nav-forward" title="Forward"><svg class="i"><use href="#i-forward"/></svg></button>
+        <button class="btn quiet icon" id="nav-reload" title="Reload"><svg class="i"><use href="#i-reload"/></svg></button>
+        <form class="address" id="address-form" autocomplete="off">
+          <label class="sr" for="address">Address</label>
+          <input class="field" id="address" spellcheck="false" placeholder="Type a web address or search">
+        </form>
+        <button class="catchbtn" id="catch-toggle" aria-pressed="true" title="Media found on this page">
+          <svg class="i"><use href="#i-net"/></svg><span>Found</span><span class="n" id="catch-count">0</span>
+        </button>
+      </div>
+      <div class="browse-body">
+        <div id="viewport"></div>
+        <aside class="catch" id="catch" aria-label="Media found on this page">
+          <div class="catch-head">
+            <div>
+              <h2 id="catch-title">Found on this page</h2>
+              <div class="site" id="catch-site"></div>
+            </div>
+            <button class="btn quiet icon" id="catch-rescan" title="Look again"><svg class="i"><use href="#i-reload"/></svg></button>
+          </div>
+          <div class="catch-list" id="catch-list"></div>
+          <div class="catch-foot" id="catch-foot">
+            <div class="row">
+              <label class="lbl" for="catch-folder">Folder</label>
+              <input class="field" id="catch-folder" spellcheck="false" placeholder="No collection folder">
+            </div>
+            <div class="row">
+              <label class="lbl" for="catch-format">Save as</label>
+              <select class="field" id="catch-format"></select>
+            </div>
+            <button class="btn catch go" id="catch-go" disabled>Download</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Queue -->
+    <section class="view screen" id="view-queue" aria-label="Queue" hidden>
+      <div class="screen-head">
+        <h1>Queue</h1>
+        <button class="btn" id="q-addlinks-toggle"><svg class="i"><use href="#i-plus"/></svg>Add links</button>
+        <span class="grow"></span>
+        <button class="btn quiet" id="q-pause-all"><svg class="i"><use href="#i-pause"/></svg>Pause all</button>
+        <button class="btn quiet" id="q-resume-all"><svg class="i"><use href="#i-play"/></svg>Resume all</button>
+        <button class="btn quiet" id="q-stop-waiting"><svg class="i"><use href="#i-stop"/></svg>Drop waiting</button>
+        <button class="btn quiet" id="q-retry-all"><svg class="i"><use href="#i-retry"/></svg>Retry failed</button>
+        <button class="btn quiet" id="q-clear"><svg class="i"><use href="#i-x"/></svg>Clear finished</button>
+      </div>
+      <form class="addlinks" id="addlinks" hidden>
+        <label for="addlinks-text">Paste links, one per line. Pages, playlists, channels and direct media links all work.</label>
+        <textarea class="field" id="addlinks-text" spellcheck="false" placeholder="https://…"></textarea>
+        <div class="row">
+          <select class="field" id="addlinks-format"></select>
+          <label class="check"><input type="checkbox" id="addlinks-force"> Download again even if I have it</label>
+          <span class="grow"></span>
+          <button class="btn primary" id="addlinks-go" type="submit">Add to queue</button>
+        </div>
+      </form>
+      <div class="summary" id="q-summary"></div>
+      <div class="screen-body" id="q-list"></div>
+    </section>
+
+    <!-- Library -->
+    <section class="view screen" id="view-library" aria-label="Library" hidden>
+      <div class="screen-head">
+        <h1>Library</h1>
+        <input class="field" id="lib-search" type="search" placeholder="Search titles">
+        <div class="chips" role="group" aria-label="Show">
+          <button data-type="all" aria-pressed="true">All</button>
+          <button data-type="video" aria-pressed="false">Video</button>
+          <button data-type="audio" aria-pressed="false">Audio</button>
+        </div>
+        <select class="field" id="lib-sort" aria-label="Sort">
+          <option value="new">Newest first</option>
+          <option value="old">Oldest first</option>
+          <option value="name">Name</option>
+          <option value="size">Biggest first</option>
+        </select>
+        <span class="grow"></span>
+        <button class="btn" id="lib-folder"><svg class="i"><use href="#i-folder"/></svg>Open download folder</button>
+      </div>
+      <div class="lib">
+        <div class="lib-side"><div class="tree" id="lib-tree"></div></div>
+        <div class="lib-main" id="lib-main">
+          <div class="selbar" id="lib-selbar" hidden>
+            <span id="lib-selcount"></span>
+            <span class="grow"></span>
+            <button class="btn" id="lib-sel-move"><svg class="i"><use href="#i-move"/></svg>Move to folder…</button>
+            <button class="btn" id="lib-sel-forget">Remove from library</button>
+            <button class="btn" id="lib-sel-trash"><svg class="i"><use href="#i-trash"/></svg>Delete files</button>
+            <button class="btn" id="lib-sel-none">Clear selection</button>
+          </div>
+          <div class="screen-body" id="lib-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="view screen" id="view-settings" aria-label="Settings" hidden>
+      <div class="screen-head"><h1>Settings</h1></div>
+      <div class="screen-body settings">
+        <div class="set">
+          <div class="k">Download folder</div>
+          <div class="v">
+            <div class="row"><span class="path" id="s-dir"></span><button class="btn" id="s-dir-pick">Change…</button></div>
+          </div>
+        </div>
+        <div class="set">
+          <div class="k">Organise downloads</div>
+          <div class="v">
+            <select class="field" id="s-layout"></select>
+            <label class="check"><input type="checkbox" id="s-split"> Keep audio and video in separate folders</label>
+            <div class="preview" id="s-preview"></div>
+          </div>
+        </div>
+        <div class="set">
+          <div class="k">Default format</div>
+          <div class="v"><select class="field" id="s-format"></select></div>
+        </div>
+        <div class="set">
+          <div class="k">Download at the same time</div>
+          <div class="v">
+            <select class="field" id="s-concurrency">
+              <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option>
+            </select>
+          </div>
+        </div>
+        <div class="set">
+          <div class="k">Skip things I already have</div>
+          <div class="v">
+            <label class="check"><input type="checkbox" id="s-skip"> Don't queue anything that's already in the library</label>
+          </div>
+        </div>
+        <div class="set">
+          <div class="k">Finding media</div>
+          <div class="v">
+            <label class="check"><input type="checkbox" id="s-autoscan"> Check each page with yt-dlp for videos and playlists</label>
+            <div class="row">Hide files smaller than <input class="field" id="s-minsize" type="number" min="0" step="50"> KB</div>
+            <div class="hint">yt-dlp knows over 1,800 sites, including YouTube, Vimeo, SoundCloud, Bandcamp and TikTok. Media that plays on any other page is caught as it loads.</div>
+          </div>
+        </div>
+        <div class="set">
+          <div class="k">Logins for downloads</div>
+          <div class="v">
+            <select class="field" id="s-login"></select>
+            <div class="hint">Downloads use whatever you're logged into in browseDL's own browser. If a site won't let you log in here (Google sometimes refuses), log in with your usual browser and pick it here instead. Close that browser first on Windows.</div>
+          </div>
+        </div>
+        <div class="set">
+          <div class="k">Home page</div>
+          <div class="v"><input class="field" id="s-home" spellcheck="false"></div>
+        </div>
+        <div class="set">
+          <div class="k">Log out of everything</div>
+          <div class="v">
+            <div class="row"><button class="btn danger" id="s-clear">Clear browsing data…</button></div>
+            <div class="hint">Removes cookies, logins and cache from the built-in browser. Downloads and the library stay.</div>
+          </div>
+        </div>
+        <div class="set">
+          <div class="k">yt-dlp</div>
+          <div class="v">
+            <div class="row"><span id="s-ytdlp">Checking version…</span><button class="btn" id="s-update">Update yt-dlp</button></div>
+            <div class="hint">Sites change often and yt-dlp keeps up. If a site that used to work stops working, update it here.</div>
+          </div>
+        </div>
+        <div class="set">
+          <div class="k">About</div>
+          <div class="v"><div>browseDL <span id="s-version"></span>. Only download things you have the right to keep, and respect each site's terms.</div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status" aria-live="polite">
+    <div class="meter" id="st-meter" hidden><i></i></div>
+    <div class="msg" id="st-msg">Nothing downloading</div>
+    <button class="btn" id="st-stop" hidden><svg class="i"><use href="#i-stop"/></svg>Stop all</button>
+  </footer>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlg-form">
+    <h2 id="dlg-title"></h2>
+    <p id="dlg-text"></p>
+    <input class="field" id="dlg-input" spellcheck="false" list="dlg-options">
+    <datalist id="dlg-options"></datalist>
+    <div class="acts">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" id="dlg-ok" value="ok">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

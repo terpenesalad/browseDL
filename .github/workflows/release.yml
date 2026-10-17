@@ -1,0 +1,110 @@
+name: Test and release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+            flags: --win
+            app: dist/win-unpacked/browseDL.exe
+            files: |
+              dist/browseDL-windows-setup.exe
+              dist/browseDL-windows-portable.exe
+          - os: macos-latest
+            target: darwin-arm64
+            flags: --mac
+            app: dist/mac-arm64/browseDL.app/Contents/MacOS/browseDL
+            files: dist/browseDL-macos-arm64.dmg
+          - os: ubuntu-22.04
+            target: linux-x64
+            flags: --linux
+            app: dist/linux-unpacked/browsedl
+            files: dist/browseDL-linux.AppImage
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Download yt-dlp, ffmpeg and deno
+        run: node scripts/fetch-binaries.mjs ${{ matrix.target }}
+      - name: Build
+        run: npx electron-builder ${{ matrix.flags }} --publish never
+      - name: Self-test the built app (downloads, joins and converts real files)
+        shell: bash
+        env:
+          BROWSEDL_SELFTEST_LOG: ${{ runner.temp }}/selftest.log
+        run: |
+          set +e
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a "${{ matrix.app }}" --no-sandbox --self-test
+          else
+            "${{ matrix.app }}" --self-test
+          fi
+          code=$?
+          echo "----- self-test log -----"
+          cat "$BROWSEDL_SELFTEST_LOG" || true
+          exit $code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browseDL-${{ matrix.target }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  release:
+    # Runs for a pushed v* tag, or when started by hand from the Actions tab
+    # (the tag is then made from the version in package.json).
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la artifacts
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="v$(node -p 'require("./package.json").version')"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* --target "$GITHUB_SHA" --title "browseDL $TAG" --notes-file docs/RELEASE_NOTES.md
+          fi
