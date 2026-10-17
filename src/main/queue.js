@@ -13,6 +13,7 @@ const ACTIVE = new Set(['queued', 'running', 'paused']);
 const PERSIST = [
   'id', 'url', 'title', 'kind', 'media', 'pageUrl', 'site', 'collection', 'format', 'headers', 'name', 'thumbnail',
   'duration', 'keys', 'status', 'progress', 'size', 'file', 'error', 'addedAt', 'startedAt', 'finishedAt', 'extractor',
+  'root', 'multi', 'playlistItem', 'files', 'part',
 ];
 
 class Queue extends EventEmitter {
@@ -25,6 +26,7 @@ class Queue extends EventEmitter {
    * @param {() => Promise<Electron.Cookie[]>} deps.getCookies
    * @param {() => string} deps.userAgent
    * @param {string} deps.workDir  where partial downloads and cookie files live
+   * @param {(url:string) => Promise<{args:string[], file:string}|null>} [deps.authFor]  login token for sites that need one
    */
   constructor(deps) {
     super();
@@ -72,7 +74,9 @@ class Queue extends EventEmitter {
     for (const e of entries) {
       if (!e || !e.url) continue;
       const idKey = e.id && e.extractor ? `${String(e.extractor).toLowerCase()}:${e.id}` : null;
-      const keys = [...new Set([mediaKey(e.url), idKey, ...(e.keys || [])].filter(Boolean))];
+      // Works of one list share its URL, so each is told apart by its position.
+      const urlKey = e.playlistItem ? `${mediaKey(e.url)}#${e.playlistItem}` : mediaKey(e.url);
+      const keys = [...new Set([urlKey, idKey, ...(e.keys || [])].filter(Boolean))];
       if (this.items.some((i) => ACTIVE.has(i.status) && i.keys && i.keys.some((k) => keys.includes(k)))) {
         dupes++;
         continue;
@@ -96,6 +100,9 @@ class Queue extends EventEmitter {
         thumbnail: e.thumbnail || null,
         duration: e.duration || null,
         keys,
+        root: e.root || null, // a download folder chosen for this batch, instead of the default
+        multi: !!e.multi, // a link that may hold several works (a concert, a playlist)
+        playlistItem: e.playlistItem || null,
         status: 'queued',
         progress: null,
         size: e.size || null,
@@ -183,13 +190,14 @@ class Queue extends EventEmitter {
     const settings = this.settings();
     const slot = { child: null, intent: null };
     this.procs.set(item.id, slot);
-    Object.assign(item, { status: 'running', error: null, phase: 'Starting', startedAt: Date.now(), speed: null, eta: null });
+    Object.assign(item, { status: 'running', error: null, phase: 'Starting', startedAt: Date.now(), speed: null, eta: null, part: null });
     this._changed(true);
 
     const audio = Y.FORMATS[item.format] && Y.FORMATS[item.format].audio;
     const media = audio ? 'audio' : item.media === 'audio' ? 'audio' : 'video';
+    const root = item.root || settings.downloadDir;
     const homeDir = outputDir({
-      root: settings.downloadDir, layout: settings.layout, splitByType: settings.splitByType,
+      root, layout: settings.layout, splitByType: settings.splitByType,
       media, site: item.site, collection: item.collection,
     });
     const tempDir = this._tempDir(item);
@@ -207,7 +215,7 @@ class Queue extends EventEmitter {
       directBase = unique;
       outName = templateLiteral(unique);
     } else {
-      outName = '%(title).150B [%(id)s]';
+      outName = item.multi ? Y.MULTI_OUTNAME : '%(title).150B [%(id)s]';
     }
 
     let cookieFile = null;
@@ -219,10 +227,12 @@ class Queue extends EventEmitter {
       writeCookieFile(cookieFile, await this.getCookies());
     }
 
+    const auth = this.authFor && !isDirect ? await this.authFor(item.url).catch(() => null) : null;
     const bin = await this.bins.ytdlp();
     if (slot.intent) {
       // Stopped while we were getting ready.
       if (cookieFile) rm(cookieFile);
+      if (auth) rm(auth.file);
       this.procs.delete(item.id);
       this.reserved.delete(item.id);
       this.pump();
@@ -235,11 +245,14 @@ class Queue extends EventEmitter {
     const args = Y.downloadArgs({
       url: item.url, format: item.format, homeDir, tempDir, outName, cookieFile, cookiesFromBrowser,
       userAgent: this.userAgent(), headers: item.headers, ffmpegDir: this.bins.ffmpegDir, isDirect, pathFile,
+      multi: item.multi, playlistItem: item.playlistItem, authArgs: auth ? auth.args : null,
     });
 
     const tracker = new Y.ProgressTracker();
     let file = null;
     let videoId = null;
+    let part = null; // which work of a list is downloading
+    let tracker2 = tracker;
     let lastError = null;
     const errors = [];
     const onLine = (line) => {
@@ -247,8 +260,14 @@ class Queue extends EventEmitter {
       if (!ev) return;
       if (ev.type === 'meta') {
         const m = ev.meta || {};
-        tracker.setFormat(m.format_id);
-        if (m.title && !isDirect) item.title = m.title;
+        if (item.multi && m.playlist_index && m.playlist_index !== (part && part.index)) {
+          part = { index: m.playlist_index, count: m.n_entries || null };
+          tracker2 = new Y.ProgressTracker();
+          item.part = part;
+        }
+        tracker2.setFormat(m.format_id);
+        if (m.title && !isDirect && !item.multi) item.title = m.title;
+        if (item.multi && m.playlist_title && item.title === item.url) item.title = m.playlist_title;
         if (m.thumbnail && !item.thumbnail) item.thumbnail = m.thumbnail;
         if (m.duration) item.duration = m.duration;
         if (m.extractor_key) item.extractor = m.extractor_key;
@@ -260,12 +279,14 @@ class Queue extends EventEmitter {
         item.phase = 'Downloading';
         this._changed(false, item.id);
       } else if (ev.type === 'progress') {
-        const p = tracker.update(ev);
+        let p = tracker2.update(ev);
+        if (p != null && part && part.count) p = (part.index - 1 + p) / part.count;
         if (p != null) item.progress = p;
         item.speed = ev.speed;
-        item.eta = ev.eta;
-        if (ev.total) item.size = tracker.parts > 1 ? item.size : ev.total;
-        item.phase = tracker.parts > 1 ? (tracker.index === 0 ? 'Downloading picture' : 'Downloading sound') : 'Downloading';
+        item.eta = part && part.count > 1 ? null : ev.eta;
+        if (ev.total && !part) item.size = tracker2.parts > 1 ? item.size : ev.total;
+        item.phase = tracker2.parts > 1 ? (tracker2.index === 0 ? 'Downloading picture' : 'Downloading sound') : 'Downloading';
+        if (part && part.count > 1) item.phase = `Work ${part.index} of ${part.count}: ${item.phase.toLowerCase()}`;
         this._changed(false, item.id);
       } else if (ev.type === 'pp' && ev.status === 'started') {
         const names = { Merger: 'Joining picture and sound', ExtractAudio: 'Converting audio', FFmpegExtractAudio: 'Converting audio', EmbedThumbnail: 'Adding cover art', FixupM3u8: 'Tidying up', Metadata: 'Adding details', FFmpegMetadata: 'Adding details', MoveFiles: 'Filing' };
@@ -289,28 +310,44 @@ class Queue extends EventEmitter {
     slot.child = child;
     const result = await done;
     if (cookieFile) rm(cookieFile);
+    if (auth) rm(auth.file);
     this.procs.delete(item.id);
     this.reserved.delete(item.id);
+    let saved = [];
     if (!slot.intent && result.code === 0) {
-      file = locateSaved({ pathFile, printed: file, homeDir, startedAt: item.startedAt, videoId: isDirect ? null : videoId, base: directBase });
+      saved = item.multi ? savedFiles(pathFile) : [];
+      if (!saved.length) {
+        const f = locateSaved({ pathFile, printed: file, homeDir, startedAt: item.startedAt, videoId: isDirect ? null : videoId, base: directBase });
+        if (f) saved = [{ filepath: f }];
+      }
     }
+    file = saved.length ? saved[0].filepath : null;
     rm(pathFile);
 
     if (slot.intent) {
       // Paused, stopped or app closing: _halt already set the status.
       if (slot.intent === 'stopped') this._cleanTemp(item);
-    } else if (result.code === 0 && file && fs.existsSync(file)) {
+    } else if (result.code === 0 && file) {
       this._cleanTemp(item);
-      let size = null;
-      try { size = fs.statSync(file).size; } catch { /* ignore */ }
-      const finalMedia = audio || AUDIO_EXT.has(extOf('file:///' + path.basename(file))) ? 'audio' : 'video';
+      let total = 0;
+      let finalMedia = 'video';
+      for (const f of saved) {
+        let size = null;
+        try { size = fs.statSync(f.filepath).size; total += size; } catch { /* ignore */ }
+        finalMedia = audio || AUDIO_EXT.has(extOf('file:///' + path.basename(f.filepath))) ? 'audio' : 'video';
+        const own = f.id && f.extractor_key ? [`${String(f.extractor_key).toLowerCase()}:${f.id}`] : [];
+        this.library.add({
+          title: item.multi ? f.title || path.basename(f.filepath) : item.title, file: f.filepath,
+          site: item.site, collection: item.collection, media: finalMedia, size,
+          duration: (item.multi ? f.duration : item.duration) || f.duration || null,
+          thumbnail: (item.multi ? f.thumbnail : item.thumbnail) || f.thumbnail || null,
+          sourceUrl: item.url, pageUrl: item.pageUrl, keys: [...item.keys, ...own], format: item.format, root,
+          album: item.multi && saved.length > 1 ? item.title : null,
+        });
+      }
       Object.assign(item, {
-        status: 'done', progress: 1, file, size, phase: null, speed: null, eta: null, finishedAt: Date.now(), media: finalMedia,
-      });
-      this.library.add({
-        title: item.title, file, site: item.site, collection: item.collection, media: finalMedia, size,
-        duration: item.duration, thumbnail: item.thumbnail, sourceUrl: item.url, pageUrl: item.pageUrl,
-        keys: item.keys, format: item.format,
+        status: 'done', progress: 1, file, files: saved.map((f) => f.filepath), size: total || null,
+        phase: null, speed: null, eta: null, part: null, finishedAt: Date.now(), media: finalMedia,
       });
       this.emit('finished', item);
     } else if (result.error) {
@@ -402,10 +439,8 @@ class Queue extends EventEmitter {
  */
 function locateSaved({ pathFile, printed, homeDir, startedAt, videoId, base }) {
   const exists = (f) => { try { return !!f && fs.statSync(f).isFile(); } catch { return false; } };
-  try {
-    const lines = fs.readFileSync(pathFile, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    for (const l of lines.reverse()) if (exists(l)) return l;
-  } catch { /* yt-dlp didn't write it */ }
+  const fromFile = savedFiles(pathFile);
+  if (fromFile.length) return fromFile[fromFile.length - 1].filepath;
   if (exists(printed)) return printed;
   let names = [];
   try { names = fs.readdirSync(homeDir); } catch { return null; }
@@ -428,6 +463,23 @@ function locateSaved({ pathFile, printed, homeDir, startedAt, videoId, base }) {
   }
   const fresh = files.filter((f) => f.t >= (startedAt || 0) - 2000);
   return fresh.length === 1 ? fresh[0].full : null;
+}
+
+/** Files yt-dlp reported saving (one JSON object, or a bare path, per line) that really exist. */
+function savedFiles(pathFile) {
+  let lines;
+  try { lines = fs.readFileSync(pathFile, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean); } catch { return []; }
+  const out = [];
+  const seen = new Set();
+  for (const l of lines) {
+    let rec;
+    try { rec = l.startsWith('{') ? JSON.parse(l) : { filepath: l }; } catch { continue; }
+    if (!rec || !rec.filepath || seen.has(rec.filepath)) continue;
+    try { if (!fs.statSync(rec.filepath).isFile()) continue; } catch { continue; }
+    seen.add(rec.filepath);
+    out.push(rec);
+  }
+  return out;
 }
 
 function publicItem(i) {
@@ -457,4 +509,4 @@ function rmrf(d) {
   try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 3 }); } catch { /* ignore */ }
 }
 
-module.exports = { Queue, uniqueBase, locateSaved };
+module.exports = { Queue, uniqueBase, locateSaved, savedFiles };

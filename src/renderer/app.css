@@ -274,8 +274,12 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 }
 .catch-foot .row { display: flex; gap: 8px; align-items: center; }
 .catch-foot label.lbl { font-size: 12.5px; color: var(--ink-2); width: 54px; flex: none; }
-.catch-foot .field { flex: 1; }
+.catch-foot .field { flex: 1 1 0; width: 0; min-width: 0; }
 .catch-foot .go { width: 100%; height: 38px; font-size: 14.5px; }
+.savein { max-width: 100%; text-overflow: ellipsis; }
+#addlinks-dir { max-width: 320px; }
+.pick .url { color: var(--ink-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-note { padding: 0 6px 6px; color: var(--ink-3); font-size: 12px; }
 
 /* ---------- screens: shared ---------- */
 .screen-head {

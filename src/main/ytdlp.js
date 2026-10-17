@@ -58,10 +58,10 @@ function downloadArgs(o) {
     '--newline', '--no-simulate', '--quiet', '--progress', '--no-color',
     '--progress-template', PROGRESS_TEMPLATE,
     '--progress-template', 'postprocess:BDL_PP %(progress.status)s|%(progress.postprocessor)s',
-    '--print', 'video:BDL_META %(.{title,id,format_id,extractor_key,duration,thumbnail,webpage_url,ext,uploader,playlist_title})j',
+    '--print', 'video:BDL_META %(.{title,id,format_id,extractor_key,duration,thumbnail,webpage_url,ext,uploader,playlist_title,playlist_index,n_entries})j',
     '--print', 'after_move:BDL_FILE %(filepath)s',
     '--encoding', 'utf-8',
-    '--no-mtime', '--no-playlist', '--no-overwrites', '--continue',
+    '--no-mtime', '--no-overwrites', '--continue',
     '--retries', '10', '--fragment-retries', '10', '--concurrent-fragments', '4',
     '--embed-metadata',
     '-P', `home:${o.homeDir}`,
@@ -70,7 +70,12 @@ function downloadArgs(o) {
     ...formatArgs(o.format),
   ];
   if ((o.format === 'mp3' || o.format === 'm4a') && !o.isDirect) a.push('--embed-thumbnail');
-  if (o.pathFile) a.push('--print-to-file', 'after_move:%(filepath)s', o.pathFile.replace(/%/g, '%%'));
+  // One work of a list whose works have no page of their own (a concert's pieces, say).
+  if (o.playlistItem) a.push('--playlist-items', String(o.playlistItem));
+  // A link that may be a whole list (a concert, a playlist) downloads all of it; otherwise just the one video.
+  else if (!o.multi) a.push('--no-playlist');
+  // yt-dlp also writes each saved file's details here, always as UTF-8.
+  if (o.pathFile) a.push('--print-to-file', 'after_move:%(.{filepath,title,id,extractor_key,duration,thumbnail})j', o.pathFile.replace(/%/g, '%%'));
   if (o.ffmpegDir) a.push('--ffmpeg-location', o.ffmpegDir);
   if (o.cookiesFromBrowser) a.push('--cookies-from-browser', o.cookiesFromBrowser);
   else if (o.cookieFile) a.push('--cookies', o.cookieFile);
@@ -79,9 +84,14 @@ function downloadArgs(o) {
     if (v && /^[A-Za-z-]+$/.test(k) && !/[\r\n]/.test(v)) a.push('--add-header', `${k}:${v}`);
   }
   if (o.isDirect) a.push('--force-generic-extractor');
+  if (o.authArgs) a.push(...o.authArgs);
   a.push('--', o.url);
   return a;
 }
+
+/** Output name for a link that may hold several works: each list gets its own folder, works numbered in order. */
+// ("." keeps a link that turns out to be a single video in the chosen folder itself.)
+const MULTI_OUTNAME = '%(playlist_title|.).120B/%(playlist_index&{:02d} |)s%(title).150B [%(id)s]';
 
 /** Arguments to list what's on a page without downloading. */
 function scanArgs(o) {
@@ -90,8 +100,31 @@ function scanArgs(o) {
   if (o.cookiesFromBrowser) a.push('--cookies-from-browser', o.cookiesFromBrowser);
   else if (o.cookieFile) a.push('--cookies', o.cookieFile);
   if (o.userAgent) a.push('--user-agent', o.userAgent);
+  if (o.authArgs) a.push(...o.authArgs);
   a.push('--', o.url);
   return a;
+}
+
+/** Arguments to ask yt-dlp, in one run, which of several links it can download. */
+function linkCheckArgs(o) {
+  const a = [
+    '--simulate', '--flat-playlist', '--ignore-errors', '--no-warnings', '--no-color', '--playlist-end', '1',
+    '--print', 'playlist:BDL_OK %(original_url)s', '--print', 'video:BDL_OK %(original_url)s',
+  ];
+  if (o.siteOnly) a.push('--ies', 'default,-generic');
+  if (o.cookiesFromBrowser) a.push('--cookies-from-browser', o.cookiesFromBrowser);
+  else if (o.cookieFile) a.push('--cookies', o.cookieFile);
+  if (o.userAgent) a.push('--user-agent', o.userAgent);
+  if (o.authArgs) a.push(...o.authArgs);
+  a.push('--', ...o.urls);
+  return a;
+}
+
+/** The links (from those asked about) that yt-dlp printed as recognised. */
+function recognisedLinks(out, urls) {
+  const norm = (u) => String(u || '').trim().replace(/#.*$/, '').replace(/\/+$/, '');
+  const printed = new Set(String(out).split(/\r?\n/).filter((l) => l.startsWith('BDL_OK ')).map((l) => norm(l.slice(7))));
+  return new Set(urls.filter((u) => printed.has(norm(u))));
 }
 
 const num = (s) => (s === undefined || s === 'NA' || s === 'None' || s === '' ? null : Number(s));
@@ -159,6 +192,9 @@ function friendlyError(msg) {
   const m = String(msg || '');
   const low = m.toLowerCase();
   if (/drm|widevine|playready|fairplay/.test(low)) return 'This is DRM-protected, so it can\'t be saved.';
+  if (/access_token_production|only available for registered users|access token has expired|tokens have been invalidated/.test(low)) {
+    return 'This site needs you to be logged in. Log in on its page in Browse (and play something once), then retry.';
+  }
   if (/http error 403|forbidden/.test(low)) return 'The site refused the download (403). Open the page in Browse, play it for a moment, then queue it again so browseDL gets a fresh link.';
   if (/http error 401|login required|sign in|log in|logged in|members[- ]only|cookies/.test(low) && !/cookies-from-browser.*could not/.test(low)) return 'This needs you to be logged in. Log in to the site in Browse, then retry.';
   if (/could not (find|copy|decrypt).*cookie|cookie database|failed to decrypt with dpapi/.test(low)) return 'Couldn\'t read your other browser\'s logins. Close that browser and retry, or switch "Logins from" to browseDL in Settings.';
@@ -226,14 +262,25 @@ function killTree(child) {
  * Turn yt-dlp's -J output into a flat list of things that can be queued.
  * Entries that are themselves lists (a channel's "Videos" tab, say) come back with isList.
  */
-function scanResultToEntries(info) {
+function scanResultToEntries(info, scannedUrl) {
   if (!info) return { title: null, entries: [] };
+  const listUrl = info.webpage_url || info.original_url || scannedUrl || null;
   const thumb = (e) => e.thumbnail || (Array.isArray(e.thumbnails) && e.thumbnails.length ? e.thumbnails[e.thumbnails.length - 1].url : null);
   if (info._type === 'playlist' || Array.isArray(info.entries)) {
     const entries = [];
+    let position = 0;
     for (const e of info.entries || []) {
+      position++;
       if (!e) continue;
-      const url = e.url || e.webpage_url || e.original_url;
+      // Some sites (Digital Concert Hall, say) list works that have no page of their own: the entry
+      // is a fully read video whose "url" is the stream itself. Those are downloaded as item N of the list.
+      const resolved = !!(e.formats || e.requested_formats || e.format_id);
+      let url = resolved ? e.webpage_url || e.original_url : e.url || e.webpage_url || e.original_url;
+      let playlistItem = null;
+      if (resolved && listUrl && (!url || url === listUrl)) {
+        url = listUrl;
+        playlistItem = e.playlist_index || position;
+      }
       if (!url) continue;
       const listyExtractor = /tab|playlist|channel|user|album|set/i.test(e.ie_key || '');
       const isList = e._type === 'playlist' || (listyExtractor && !e.duration && !/watch\?v=|\/shorts\//.test(url));
@@ -247,6 +294,7 @@ function scanResultToEntries(info) {
         live: e.live_status === 'is_live' || e.live_status === 'is_upcoming',
         availability: e.availability || null,
         isList,
+        playlistItem,
       });
     }
     return { title: info.title || null, uploader: info.uploader || info.channel || null, extractor: info.extractor_key || null, entries };
@@ -273,6 +321,6 @@ function absolutise(url, base) {
 }
 
 module.exports = {
-  FORMATS, BROWSERS, formatArgs, downloadArgs, scanArgs, parseLine, ProgressTracker,
+  FORMATS, BROWSERS, formatArgs, downloadArgs, scanArgs, linkCheckArgs, recognisedLinks, MULTI_OUTNAME, parseLine, ProgressTracker,
   friendlyError, run, killTree, scanResultToEntries,
 };

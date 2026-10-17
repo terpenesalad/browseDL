@@ -7,7 +7,7 @@ const INVOKE = new Set([
   'tab:new', 'tab:close', 'tab:activate', 'tab:navigate', 'tab:go', 'tab:media', 'tab:rescan', 'browser:bounds', 'scan:list',
   'queue:add', 'queue:action', 'queue:addLinks',
   'library:open', 'library:reveal', 'library:remove', 'library:move', 'library:rename', 'library:forgetMissing', 'library:openPage',
-  'settings:set', 'settings:chooseFolder',
+  'settings:set', 'settings:chooseFolder', 'folder:choose', 'folder:remember',
   'app:openFolder', 'app:updateYtdlp', 'app:clearBrowsing', 'app:openExternal',
 ]);
 const EVENTS = new Set(['tabs', 'media', 'queue', 'queue:items', 'library', 'settings', 'toast', 'focus-address', 'show-view', 'open-catch']);

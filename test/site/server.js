@@ -53,7 +53,19 @@ function start(dir, port = 0) {
           <li><a href="/media/ep1.mp3">Episode 1: Owls</a></li>
           <li><a href="/media/ep2.mp3">Episode 2: Foxes</a></li>
           <li><a href="/media/hls/index.m3u8">Live archive (stream)</a></li>
+        </ul>
+        <h2>From the archive</h2><ul>
+          <li><a href="/show/101">Owls at midnight<br><small>Recorded 2024</small></a></li>
+          <li><a href="/show/102">Foxes at dawn</a></li>
         </ul>`));
+      return;
+    }
+    // Pages with one video each, like a concert page on a subscription site.
+    const show = /^\/show\/(\d+)$/.exec(url.pathname);
+    if (show) {
+      if (!loggedIn) { res.writeHead(302, { location: '/login' }).end(); return; }
+      res.writeHead(200, { 'content-type': 'text/html' }).end(page(`Show ${show[1]}`, `<h1>Show ${show[1]}</h1>
+        <video controls src="/media/clip.mp4?show=${show[1]}"></video>`));
       return;
     }
     if (url.pathname.startsWith('/media/')) {

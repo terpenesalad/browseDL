@@ -40,12 +40,13 @@ function screen(name) {
   const server = await site.start(media);
   const base = `http://127.0.0.1:${server.address().port}`;
   fs.mkdirSync(userData, { recursive: true });
-  fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ downloadDir: downloads, homePage: `${base}/`, concurrency: 3, minSizeKB: 0 }));
+  const elsewhere = path.join(tmp, 'Elsewhere – “chosen”');
+  fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ downloadDir: downloads, homePage: `${base}/`, concurrency: 3, minSizeKB: 0, recentDirs: [elsewhere] }));
 
   const app = await electron.launch({
     cwd: ROOT,
     args: ['.', '--no-sandbox'],
-    env: { ...process.env, BROWSEDL_USER_DATA: userData },
+    env: { ...process.env, BROWSEDL_USER_DATA: userData, BROWSEDL_TEST_GENERIC_LINKS: '1' },
   });
   let ok = false;
   try {
@@ -161,6 +162,28 @@ function screen(name) {
     const procs = execFileSync('ps', ['-eo', 'args']).toString().split('\n').filter((l) => /yt-dlp/.test(l) && /big2\.mp4/.test(l));
     assert.deepEqual(procs, [], 'no yt-dlp left running');
     if (SHOTS) await win.screenshot({ path: path.join(SHOTS, 'queue2.png') });
+
+    // 11. Linked pages: the archive's show pages are listed (unticked), and go to a folder chosen for this batch.
+    await win.click('.nav[data-view="browse"]');
+    await waitFor(async () => /Linked show pages \(2\)/.test(await win.textContent('#catch-list')), 'linked show pages', 60000);
+    const linkedTitles = await win.$$eval('#catch-list .pick .title', (els) => els.map((e) => e.textContent));
+    assert.ok(linkedTitles.includes('Owls at midnight – Recorded 2024'), `linked titles: ${linkedTitles}`);
+    assert.equal(await win.textContent('#catch-go'), 'Download', 'linked pages start unticked');
+    await win.locator('.group', { hasText: 'Linked show pages' }).locator('[data-all]').click();
+    assert.equal(await win.textContent('#catch-go'), 'Download 2');
+    await win.selectOption('#catch-dir', elsewhere);
+    if (SHOTS) screen('linked');
+    await win.click('#catch-go');
+    await win.click('.nav[data-view="queue"]');
+    const savedElsewhere = () => {
+      const found = [];
+      const walk = (d) => { if (!fs.existsSync(d)) return; for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.mp4')) found.push(path.relative(elsewhere, p)); } };
+      walk(elsewhere);
+      return found;
+    };
+    await waitFor(() => savedElsewhere().length === 2, 'two show videos in the chosen folder', 120000);
+    console.log('Saved in chosen folder:', savedElsewhere());
+    assert.ok(savedElsewhere().every((f) => f.startsWith(path.join('127.0.0.1', 'Night Radio – Members'))), 'organised inside the chosen folder');
 
     ok = true;
     console.log('E2E passed');

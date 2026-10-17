@@ -1,11 +1,12 @@
 'use strict';
 // The built-in browser: tabs that keep their logins, and catching media as pages load.
-const { WebContentsView, session, Menu, clipboard, shell } = require('electron');
+const { WebContentsView, BrowserWindow, session, Menu, clipboard, shell } = require('electron');
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
 const D = require('./detect');
 const { siteName } = require('./paths');
+const SA = require('./siteauth');
 
 const PARTITION = 'persist:browse';
 const HOME = 'https://duckduckgo.com/';
@@ -16,12 +17,16 @@ class Browser extends EventEmitter {
    * @param {Electron.BrowserWindow} o.win
    * @param {() => object} o.settings
    * @param {(url:string) => Promise<object>} o.scanPage  yt-dlp page scan
+   * @param {(urls:string[], pageUrl:string) => {cancel:Function, result:Promise<object>}} o.checkLinks  which links yt-dlp knows
    */
   constructor(o) {
     super();
     this.win = o.win;
     this.settings = o.settings;
     this.scanPage = o.scanPage;
+    this.checkLinks = o.checkLinks;
+    this.patternOk = new Map(); // "host pattern" -> whether yt-dlp recognised that kind of link
+    this.tokenLocks = new Map();
     this.tabs = [];
     this.activeId = null;
     this.bounds = null;
@@ -117,6 +122,8 @@ class Browser extends EventEmitter {
       children: new Set(), // keys of HLS variants that belong to a master playlist we already listed
       scan: { status: 'idle' },
       scanUrl: null,
+      pageLinks: [],
+      linked: { status: 'idle' },
       scanTimer: null,
       domTimer: null,
       favicon: null,
@@ -140,6 +147,9 @@ class Browser extends EventEmitter {
       update();
       this._scheduleDomScan(tab, 300);
       this._scheduleScan(tab, 600);
+      // Many sites fill the page in after it "finishes" loading, so look again a little later.
+      clearTimeout(tab.lateTimer);
+      tab.lateTimer = setTimeout(() => this._scheduleDomScan(tab, 0), 3500);
     });
     wc.on('page-favicon-updated', (_e, icons) => { tab.favicon = icons[0] || null; update(); });
     wc.on('did-navigate', (_e, url) => {
@@ -147,6 +157,9 @@ class Browser extends EventEmitter {
       tab.children.clear();
       tab.scan = { status: 'idle' };
       tab.scanUrl = null;
+      tab.pageLinks = [];
+      tab.linked = { status: 'idle' };
+      if (tab.linkAbort) tab.linkAbort();
       tab.favicon = null;
       this._emitMedia(tab);
       update();
@@ -218,6 +231,8 @@ class Browser extends EventEmitter {
     clearTimeout(tab.scanTimer);
     clearTimeout(tab.domTimer);
     if (tab.scanAbort) tab.scanAbort();
+    if (tab.linkAbort) tab.linkAbort();
+    for (const t of ['linkTimer', 'lateTimer', 'mediaTimer']) clearTimeout(tab[t]);
     tab.view.webContents.close();
     this.tabs.splice(idx, 1);
     if (this.activeId === id) {
@@ -399,6 +414,91 @@ class Browser extends EventEmitter {
       const c = D.classifyLink(m.url);
       if (c) this._catch(tab, { url: m.url, ...c, source: 'element', headers });
     }
+    tab.pageLinks = r.pages || [];
+    this._scheduleLinkCheck(tab, 400);
+  }
+
+  _scheduleLinkCheck(tab, delay) {
+    if (!this.settings().autoScan) return;
+    clearTimeout(tab.linkTimer);
+    tab.linkTimer = setTimeout(() => this.linkCheck(tab).catch(() => {}), delay);
+  }
+
+  /**
+   * Find links on this page that lead to video pages: group the links by shape, ask yt-dlp about
+   * one link from each group it hasn't seen before, and list every link in the groups it knows.
+   */
+  async linkCheck(tab, { force = false } = {}) {
+    const url = tab.view.webContents.getURL();
+    if (!/^https?:/i.test(url)) return;
+    if (tab.scan.status === 'scanning') { this._scheduleLinkCheck(tab, 1500); return; }
+    let host;
+    try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { return; }
+    const groups = D.groupLinks(tab.pageLinks, url);
+    const unknown = groups.filter((g) => force || !this.patternOk.has(`${host} ${g.pattern}`));
+    if (unknown.length) {
+      if (tab.linkAbort) tab.linkAbort();
+      tab.linked = { ...tab.linked, status: 'checking', url };
+      this._emitMedia(tab);
+      let aborted = false;
+      const job = this.checkLinks(unknown.map((g) => g.links[0].url), url);
+      tab.linkAbort = () => { aborted = true; job.cancel(); };
+      const res = await job.result;
+      if (aborted || tab.view.webContents.isDestroyed() || tab.view.webContents.getURL() !== url) return;
+      tab.linkAbort = null;
+      if (res.ok) for (const g of unknown) this.patternOk.set(`${host} ${g.pattern}`, res.recognised.has(g.links[0].url));
+    }
+    const known = groups.filter((g) => this.patternOk.get(`${host} ${g.pattern}`));
+    tab.linked = { status: 'done', url, groups: known };
+    this._emitMedia(tab);
+    this._emitTabs();
+  }
+
+  /**
+   * A login token from a site's local storage in the built-in browser (for sites where yt-dlp
+   * can't use cookies). Opens the site in a hidden window if no tab has it open, and lets the
+   * site refresh an expired token.
+   */
+  async siteToken(site) {
+    if (this.tokenLocks.has(site.id)) return this.tokenLocks.get(site.id);
+    const p = this._readSiteToken(site).finally(() => this.tokenLocks.delete(site.id));
+    this.tokenLocks.set(site.id, p);
+    return p;
+  }
+
+  async _readSiteToken(site) {
+    const read = async (wc) => {
+      const code = `(${JSON.stringify(site.storageKeys)}).map((k) => { try { return localStorage.getItem(k); } catch { return null; } })`;
+      const vals = await wc.executeJavaScriptInIsolatedWorld(1998, [{ code }]).catch(() => []);
+      for (const v of vals || []) {
+        const t = SA.cleanToken(v);
+        if (t) return t;
+      }
+      return null;
+    };
+    const originOf = (u) => { try { return new URL(u).origin; } catch { return ''; } };
+    const open = this.tabs.map((t) => t.view.webContents).find((wc) => !wc.isDestroyed() && originOf(wc.getURL()) === site.origin);
+    if (open) {
+      const t = await read(open);
+      if (t && SA.tokenFresh(t)) return t;
+    }
+    // Load the site out of sight: first a tiny page to read storage, then the real site if the
+    // token needs refreshing (the site's own code does that when it starts).
+    const hidden = new BrowserWindow({ show: false, webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true } });
+    try {
+      await hidden.webContents.loadURL(`${site.origin}/robots.txt`).catch(() => {});
+      let t = await read(hidden.webContents);
+      if (t && SA.tokenFresh(t)) return t;
+      await hidden.webContents.loadURL(site.refreshUrl).catch(() => {});
+      for (let i = 0; i < 20; i++) {
+        t = await read(hidden.webContents);
+        if (t && SA.tokenFresh(t)) return t;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      return t;
+    } finally {
+      if (!hidden.isDestroyed()) hidden.destroy();
+    }
   }
 
   _scheduleScan(tab, delay) {
@@ -439,6 +539,7 @@ class Browser extends EventEmitter {
       pageTitle: wc.getTitle(),
       site: siteName(wc.getURL()),
       scan: tab.scan,
+      linked: tab.linked,
       media: this._visibleMedia(tab).sort((a, b) => rank(b) - rank(a) || a.at - b.at),
     };
   }

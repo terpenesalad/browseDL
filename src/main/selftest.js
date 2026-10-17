@@ -22,7 +22,7 @@ function exec(bin, args, opts = {}) {
 }
 
 function serve(root) {
-  const types = { '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.m3u8': 'application/vnd.apple.mpegurl', '.ts': 'video/mp2t', '.mpd': 'application/dash+xml', '.m4s': 'video/iso.segment' };
+  const types = { '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.m3u8': 'application/vnd.apple.mpegurl', '.ts': 'video/mp2t', '.mpd': 'application/dash+xml', '.m4s': 'video/iso.segment', '.xml': 'application/rss+xml' };
   const server = http.createServer((req, res) => {
     let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if (p.startsWith('/private/')) {
@@ -91,6 +91,12 @@ async function selfTest({ bins }) {
 
     server = await serve(site);
     const base = `http://127.0.0.1:${server.address().port}`;
+    // A feed with two episodes stands in for a concert: one link, several works.
+    fs.writeFileSync(path.join(site, 'feed.xml'), `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Night Radio – “Live”</title><link>${base}/</link>
+<item><title>Overture</title><guid>ep1</guid><enclosure url="${base}/private/clip.mp4?ep=1" type="video/mp4" length="1"/></item>
+<item><title>Finale</title><guid>ep2</guid><enclosure url="${base}/private/clip.mp4?ep=2" type="video/mp4" length="1"/></item>
+</channel></rss>`);
 
     const settings = {
       downloadDir: out, concurrency: 3, format: 'best', layout: 'site-collection', splitByType: false,
@@ -115,6 +121,10 @@ async function selfTest({ bins }) {
         name: 'Emmanuelle Haïm conducts Handel – “Résurrection” at the Festspielhaus Baden-Baden, with Le Concert d’Astrée and a deliberately long title to test paths',
         collection: 'Daniel Harding conducts Mahler’s “Resurrection Symphony” – Orchestre de Paris – a long folder name for testing',
         url: `${base}/private/clip.mp4?as=unicode`, kind: 'file', media: 'video', format: 'best', expect: { video: true, audio: true },
+      },
+      {
+        name: 'A list saved as one item', url: `${base}/feed.xml`, kind: 'page', media: 'video', format: 'best', multi: true,
+        expect: { video: true, audio: true, files: ['Night Radio – “Live”/01 Overture', 'Night Radio – “Live”/02 Finale'] },
       },
       { name: 'HLS stream', url: `${base}/private/hls/index.m3u8`, kind: 'hls', media: 'video', format: 'best', expect: { video: true, audio: true } },
       { name: 'DASH picture and sound joined', url: `${base}/dash/manifest.mpd`, kind: 'dash', media: 'video', format: 'best', expect: { video: true, audio: true } },
@@ -143,7 +153,13 @@ async function selfTest({ bins }) {
         continue;
       }
       const types = await streamTypes(ffmpeg, item.file);
-      const good = types.has('audio') === want.audio && types.has('video') === want.video && (!want.ext || item.file.endsWith(want.ext));
+      let good = types.has('audio') === want.audio && types.has('video') === want.video && (!want.ext || item.file.endsWith(want.ext));
+      if (want.files) {
+        const rel = (item.files || []).map((f) => path.relative(path.join(out, '127.0.0.1', 'Self test'), f).split(path.sep).join('/'));
+        const match = want.files.length === rel.length && want.files.every((w, k) => rel[k] && rel[k].startsWith(w));
+        if (!match) log('     saved:', JSON.stringify(rel));
+        good = good && match;
+      }
       log(good ? 'ok  ' : 'FAIL', jobs[n].name, '->', path.relative(out, item.file), `[${[...types].join('+')}]`);
       if (!good) ok = false;
     }
@@ -151,7 +167,8 @@ async function selfTest({ bins }) {
       log('FAIL files were not organised into site/collection folders');
       ok = false;
     }
-    if (library.items.length !== jobs.length) {
+    const expected = jobs.reduce((a, j) => a + (j.expect.files ? j.expect.files.length : 1), 0);
+    if (library.items.length !== expected) {
       log('FAIL library has', library.items.length, 'items');
       ok = false;
     }

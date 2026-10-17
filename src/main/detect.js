@@ -206,7 +206,7 @@ function nameFromUrl(url) {
 // This runs inside the browsed page (in an isolated world) to list <video>, <audio> and links to media files.
 const PAGE_SCAN_SCRIPT = `(() => {
   const abs = (u) => { try { return new URL(u, location.href).href; } catch { return null; } };
-  const out = { title: document.title, url: location.href, elements: [], links: [], meta: [] };
+  const out = { title: document.title, url: location.href, elements: [], links: [], meta: [], pages: [] };
   const seen = new Set();
   for (const el of document.querySelectorAll('video, audio')) {
     const srcs = [el.currentSrc, el.src, ...[...el.querySelectorAll('source')].map((s) => s.src)];
@@ -222,7 +222,16 @@ const PAGE_SCAN_SCRIPT = `(() => {
   for (const a of document.querySelectorAll('a[href]')) {
     const u = abs(a.getAttribute('href'));
     if (!u || !/^https?:/.test(u) || seen.has(u)) continue;
-    if (!/\\.(mp4|m4v|webm|mov|mkv|avi|flv|ogv|3gp|wmv|mpg|mpeg|mp3|m4a|aac|ogg|oga|opus|flac|wav|weba|wma|aiff|aif|mka|m4b|m3u8|mpd)([?#]|$)/i.test(u)) continue;
+    if (!/\\.(mp4|m4v|webm|mov|mkv|avi|flv|ogv|3gp|wmv|mpg|mpeg|mp3|m4a|aac|ogg|oga|opus|flac|wav|weba|wma|aiff|aif|mka|m4b|m3u8|mpd)([?#]|$)/i.test(u)) {
+      // Links to other pages on this site, which may be video pages (checked later with yt-dlp).
+      if (out.pages.length < 600) {
+        const lines = (a.innerText || '').split('\\n').map((l) => l.replace(/\\s+/g, ' ').trim()).filter(Boolean);
+        const img = a.querySelector('img[alt]');
+        const text = lines.slice(0, 2).join(' – ') || a.getAttribute('title') || a.getAttribute('aria-label') || (img && img.alt) || '';
+        out.pages.push({ url: u, text: text.slice(0, 200) || null });
+      }
+      continue;
+    }
     seen.add(u);
     out.links.push({ url: u, text: (a.textContent || a.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 200) || null });
   }
@@ -233,7 +242,49 @@ const PAGE_SCAN_SCRIPT = `(() => {
   return out;
 })()`;
 
+/**
+ * Group a page's links to other pages on the same site by URL shape, e.g. every /en/concert/123
+ * link together, so one link from each group can be checked with yt-dlp.
+ * @returns {{pattern:string, label:string, links:{url:string,title:string|null}[]}[]} biggest groups first
+ */
+function groupLinks(links, pageUrl, { maxGroups = 15 } = {}) {
+  let page;
+  try { page = new URL(pageUrl); } catch { return []; }
+  const bare = (h) => h.toLowerCase().replace(/^www\./, '');
+  const groups = new Map();
+  const seen = new Set();
+  for (const l of links || []) {
+    let u;
+    try { u = new URL(l.url); } catch { continue; }
+    if (!/^https?:$/.test(u.protocol) || bare(u.hostname) !== bare(page.hostname)) continue;
+    u.hash = '';
+    const href = u.href;
+    if (href === page.href.split('#')[0]) continue;
+    const segs = u.pathname.split('/').filter(Boolean);
+    if (!segs.length && !u.search) continue; // the home page
+    if (segs.length === 1 && /^[a-z]{2}(-[a-z]{2})?$/i.test(segs[0]) && !u.search) continue; // a language's home page
+    const keys = [...u.searchParams.keys()].sort();
+    // The last part of the path (or the query values) is what changes from video to video.
+    const shape = segs.map((s, i) => (i === segs.length - 1 && !keys.length ? '*' : /\d/.test(s) && /^[\w-]+$/.test(s) && s.length > 2 && /\d{2,}/.test(s) ? '#' : s.toLowerCase()));
+    const pattern = `/${shape.join('/')}${keys.length ? '?' + keys.map((k) => `${k}=*`).join('&') : ''}`;
+    if (seen.has(href)) {
+      const g = groups.get(pattern);
+      const existing = g && g.links.find((x) => x.url === href);
+      if (existing && !existing.title && l.text) existing.title = l.text;
+      continue;
+    }
+    seen.add(href);
+    if (!groups.has(pattern)) {
+      const named = [...segs].reverse().find((s, i) => (i > 0 || keys.length) && !/\d{2,}/.test(s) && !/^[a-z]{2}(-[a-z]{2})?$/i.test(s));
+      groups.set(pattern, { pattern, label: (named || (keys.length ? segs[segs.length - 1] : null) || bare(page.hostname)).replace(/[-_]+/g, ' '), links: [] });
+    }
+    groups.get(pattern).links.push({ url: href, title: l.text || null });
+  }
+  return [...groups.values()].sort((a, b) => b.links.length - a.links.length).slice(0, maxGroups);
+}
+
 module.exports = {
+  groupLinks,
   classifyResponse,
   classifyLink,
   looksLikeSegmentPath,

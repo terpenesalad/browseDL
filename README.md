@@ -43,8 +43,15 @@ As a page loads, browseDL lists everything it can save:
 - **Whole pages, playlists and channels** on the 1,800+ sites yt-dlp knows (YouTube, Vimeo, SoundCloud, Bandcamp, TikTok, X, Twitch VODs, Dailymotion, Bilibili, many news and course sites…). A channel's sections, like *Videos* or *Shorts*, show up as lists; click **Show what's in it** to pick from them.
 - **Anything that plays on any other site**: video and audio files, and HLS and DASH streams, caught as the page loads them. If something doesn't show up, press play on it.
 - **Links to media files** on the page, like a list of podcast episodes or lecture recordings.
+- **Linked video pages**: on a listing page (a season, search results, an artist's page), browseDL checks the page's links and lists the ones that lead to videos yt-dlp can download, grouped by kind, e.g. *Linked concert pages (24)*. These start unticked; press **Tick all** to grab the lot without opening each one. A linked page with several videos (a concert with several works, a playlist) is saved into a folder of its own, numbered in order.
 
-Everything is ticked except things you've already downloaded. Untick what you don't want (**Untick all** / **Tick all** work per section), choose a **Folder** name and a format, and press **Download**.
+Everything else is ticked except things you've already downloaded. Untick what you don't want (**Untick all** / **Tick all** work per section), then choose:
+
+- **Folder**: the collection folder name (starts as the page or playlist title)
+- **Save as**: the format
+- **Save in**: where on your computer this batch goes. Your default download folder, a folder you've used recently, or **Choose a folder…**
+
+and press **Download**.
 
 You can also right-click any video, audio or media link in a page and choose **Download this video**. When a page starts a download itself (an episode's download button, say), audio and video go straight into the queue, and any other file is saved to a `Files` folder for that site.
 
@@ -56,7 +63,7 @@ Up to six downloads run at once (Settings → *Download at the same time*). Each
 - **Stop** cancels and tidies away the half-finished file. **Stop all** in the bottom bar stops everything at once.
 - **Download next** moves a waiting item to the front. **Drop waiting** clears everything that hasn't started.
 - **Retry failed** tries everything that failed again. Failures say what went wrong in plain words.
-- **Add links**: paste page, playlist, channel or direct media links, one per line.
+- **Add links**: paste page, playlist, channel or direct media links, one per line, and pick where they're saved.
 
 The queue is saved, so anything unfinished picks up again next time you open browseDL.
 
@@ -68,7 +75,7 @@ Every download is listed by site and folder. Search, show only video or only aud
 
 ### How downloads are organised
 
-By default files are saved as `Downloads/browseDL/<site>/<folder>/<title>`, for example `browseDL/youtube.com/Lo-fi mixes/Rainy day [abc123].mp4`. In Settings you can switch to *site only*, *folder only* or *everything in one folder*, and keep audio and video in separate `Audio` and `Video` folders.
+By default files are saved as `Downloads/browseDL/<site>/<folder>/<title>` (change the default in Settings, or pick another place per batch with **Save in**), for example `browseDL/youtube.com/Lo-fi mixes/Rainy day [abc123].mp4`. In Settings you can switch to *site only*, *folder only* or *everything in one folder*, and keep audio and video in separate `Audio` and `Video` folders.
 
 **Skip things I already have** (on by default) stops the same video or file being downloaded twice, even from a different page.
 
@@ -76,6 +83,10 @@ By default files are saved as `Downloads/browseDL/<site>/<folder>/<title>`, for 
 
 - **Best quality video**, or video capped at **1080p**, **720p** or **480p** (MP4, falling back to MKV only when the streams can't go in MP4)
 - **Audio only** as **MP3**, **M4A**, or the **original format** with no conversion
+
+### Sites that need a login token (Digital Concert Hall)
+
+Some sites don't use cookies for their videos, so yt-dlp needs the site's login token instead. For [Digital Concert Hall](https://www.digitalconcerthall.com/) browseDL reads it from its own browser automatically: just log in there in Browse. Concert pages then list every work, and season, search and artist pages list their linked concerts. If a download says you need to be logged in, open the site in Browse, play something for a moment, and retry.
 
 ### When a site won't let you log in here
 

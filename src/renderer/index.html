@@ -90,6 +90,10 @@
               <label class="lbl" for="catch-format">Save as</label>
               <select class="field" id="catch-format"></select>
             </div>
+            <div class="row">
+              <label class="lbl" for="catch-dir">Save in</label>
+              <select class="field savein" id="catch-dir"></select>
+            </div>
             <button class="btn catch go" id="catch-go" disabled>Download</button>
           </div>
         </aside>
@@ -113,6 +117,7 @@
         <textarea class="field" id="addlinks-text" spellcheck="false" placeholder="https://…"></textarea>
         <div class="row">
           <select class="field" id="addlinks-format"></select>
+          <select class="field savein" id="addlinks-dir" aria-label="Save in"></select>
           <label class="check"><input type="checkbox" id="addlinks-force"> Download again even if I have it</label>
           <span class="grow"></span>
           <button class="btn primary" id="addlinks-go" type="submit">Add to queue</button>

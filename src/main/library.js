@@ -60,7 +60,7 @@ class Library extends EventEmitter {
         if (!fileExists(r.file)) continue;
         try { await opts.trash(r.file); } catch { failed.push(r.title); }
       }
-      for (const r of gone) pruneEmpty(path.dirname(r.file), this.settings().downloadDir);
+      for (const r of gone) pruneEmpty(path.dirname(r.file), r.root || this.settings().downloadDir);
     }
     this.items = this.items.filter((r) => !ids.includes(r.id));
     this._index();
@@ -76,7 +76,8 @@ class Library extends EventEmitter {
     const errors = [];
     for (const r of this.items) {
       if (!ids.includes(r.id)) continue;
-      const dir = outputDir({ root: s.downloadDir, layout: s.layout, splitByType: s.splitByType, media: r.media, site: r.site, collection: coll });
+      const root = r.root || s.downloadDir;
+      const dir = outputDir({ root, layout: s.layout, splitByType: s.splitByType, media: r.media, site: r.site, collection: coll });
       if (!fileExists(r.file)) {
         r.collection = coll;
         continue;
@@ -91,7 +92,7 @@ class Library extends EventEmitter {
         const base = uniqueBase(dir, path.basename(r.file, ext), r);
         const dest = path.join(dir, base + ext);
         moveFile(r.file, dest);
-        pruneEmpty(path.dirname(r.file), s.downloadDir);
+        pruneEmpty(path.dirname(r.file), root);
         r.file = dest;
         r.collection = coll;
         moved++;

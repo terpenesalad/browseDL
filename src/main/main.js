@@ -11,6 +11,8 @@ const Y = require('./ytdlp');
 const { LAYOUTS, siteName } = require('./paths');
 const { mediaKey } = require('./detect');
 const { writeCookieFile } = require('./cookies');
+const SA = require('./siteauth');
+const crypto = require('crypto');
 
 const SELF_TEST = process.argv.includes('--self-test');
 if (process.argv.includes('--version')) {
@@ -44,6 +46,7 @@ function defaults() {
     loginSource: 'browsedl',
     homePage: 'https://duckduckgo.com/',
     lastView: 'browse',
+    recentDirs: [],
     catchOpen: true,
   };
 }
@@ -57,49 +60,97 @@ function toast(message, kind = 'info') {
   send('toast', { message, kind });
 }
 
-/** Run yt-dlp to list what's on a page. Returns a cancel handle and a promise. */
-function scanPage(url, { siteOnly = false } = {}) {
+/**
+ * Login arguments for yt-dlp on sites that need a token rather than cookies (Digital Concert Hall),
+ * read from the built-in browser. Returns null for every other site.
+ */
+async function authFor(url) {
+  const site = SA.siteFor(url);
+  if (!site || !browser) return null;
+  const token = await browser.siteToken(site).catch(() => null);
+  if (!token) return null;
+  const file = path.join(userDir(), 'work', `netrc-${crypto.randomUUID()}`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  return { args: SA.writeNetrc(file, site, token), file };
+}
+
+/**
+ * Run yt-dlp with the built-in browser's logins. `build` gets the login options and returns the
+ * arguments. Returns a cancel handle and a promise of {code, out, err}.
+ */
+function ytdlpJob({ authUrl, build, timeout = 120000 }) {
   let child = null;
   let cancelled = false;
-  const cookieFile = path.join(userDir(), 'work', `cookies-scan-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
+  const temp = [];
+  const cleanup = () => { for (const f of temp.splice(0)) { try { fs.unlinkSync(f); } catch { /* gone */ } } };
   const result = (async () => {
     const s = settings();
-    let useFile = null;
+    let cookieFile = null;
     if (s.loginSource === 'browsedl') {
+      cookieFile = path.join(userDir(), 'work', `cookies-scan-${crypto.randomUUID()}.txt`);
       fs.mkdirSync(path.dirname(cookieFile), { recursive: true });
       writeCookieFile(cookieFile, await browser.cookies());
-      useFile = cookieFile;
+      temp.push(cookieFile);
     }
+    const auth = authUrl ? await authFor(authUrl) : null;
+    if (auth) temp.push(auth.file);
     const bin = await bins.ytdlp();
-    if (cancelled) return { ok: false, cancelled: true };
-    const args = Y.scanArgs({ url, siteOnly, cookieFile: useFile, cookiesFromBrowser: s.loginSource !== 'browsedl' ? s.loginSource : null, userAgent: browser.userAgent });
+    if (cancelled) { cleanup(); return { cancelled: true }; }
+    const args = build({
+      cookieFile, cookiesFromBrowser: s.loginSource !== 'browsedl' ? s.loginSource : null,
+      userAgent: browser.userAgent, authArgs: auth ? auth.args : [],
+    });
     let out = '';
     let err = '';
     const run = Y.run(bin, args, { env: bins.env(), onLine: (l) => { out += l + '\n'; }, onErrLine: (l) => { err += l + '\n'; } });
     child = run.child;
-    const timer = setTimeout(() => Y.killTree(child), 120000);
+    const timer = setTimeout(() => Y.killTree(child), timeout);
     const r = await run.done;
     clearTimeout(timer);
-    try { fs.unlinkSync(cookieFile); } catch { /* gone */ }
-    if (cancelled) return { ok: false, cancelled: true };
-    const errMsg = (err.match(/ERROR: (.*)/) || [])[1] || '';
-    if (r.code !== 0) {
-      return { ok: false, unsupported: /unsupported url|no suitable extractor/i.test(err), error: Y.friendlyError(errMsg || err.trim().split('\n').pop()) };
-    }
-    try {
-      const json = JSON.parse(out.trim().split('\n').filter((l) => l.startsWith('{')).pop() || 'null');
-      return { ok: true, ...Y.scanResultToEntries(json) };
-    } catch (e) {
-      return { ok: false, error: 'yt-dlp gave an answer browseDL couldn\'t read.' };
-    }
-  })().catch((e) => ({ ok: false, error: e.message }));
+    cleanup();
+    return { code: r.code, out, err, cancelled };
+  })().catch((e) => { cleanup(); return { code: -1, out: '', err: `ERROR: ${e.message}` }; });
   return {
     cancel() {
       cancelled = true;
       if (child) Y.killTree(child);
-      try { fs.unlinkSync(cookieFile); } catch { /* gone */ }
+      cleanup();
     },
     result,
+  };
+}
+
+/** List what's on a page with yt-dlp. */
+function scanPage(url, { siteOnly = false } = {}) {
+  const job = ytdlpJob({ authUrl: url, build: (o) => Y.scanArgs({ url, siteOnly, ...o }) });
+  return {
+    cancel: job.cancel,
+    result: job.result.then((r) => {
+      if (r.cancelled) return { ok: false, cancelled: true };
+      const errMsg = (r.err.match(/ERROR: (.*)/) || [])[1] || '';
+      if (r.code !== 0) {
+        return { ok: false, unsupported: /unsupported url|no suitable extractor/i.test(r.err), error: Y.friendlyError(errMsg || r.err.trim().split('\n').pop()) };
+      }
+      try {
+        const json = JSON.parse(r.out.trim().split('\n').filter((l) => l.startsWith('{')).pop() || 'null');
+        return { ok: true, ...Y.scanResultToEntries(json, url) };
+      } catch {
+        return { ok: false, error: 'yt-dlp gave an answer browseDL couldn\'t read.' };
+      }
+    }),
+  };
+}
+
+/** Which of these links does yt-dlp know how to download? One yt-dlp run checks them all. */
+function checkLinks(urls, pageUrl) {
+  const generic = process.env.BROWSEDL_TEST_GENERIC_LINKS === '1'; // lets tests use a local site
+  const job = ytdlpJob({ authUrl: pageUrl, timeout: 90000, build: (o) => Y.linkCheckArgs({ urls, siteOnly: !generic, ...o }) });
+  return {
+    cancel: job.cancel,
+    result: job.result.then((r) => {
+      if (r.cancelled) return { ok: false };
+      return { ok: true, recognised: Y.recognisedLinks(r.out, urls) };
+    }),
   };
 }
 
@@ -130,7 +181,7 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
-  browser = new Browser({ win, settings, scanPage });
+  browser = new Browser({ win, settings, scanPage, checkLinks });
   browser.on('tabs', (s) => send('tabs', s));
   browser.on('media', (m) => send('media', m ? { ...m, downloaded: downloadedFlags(m) } : m));
   browser.on('toast', (m) => toast(m));
@@ -152,11 +203,12 @@ function createWindow() {
 function downloadedFlags(m) {
   const media = m.media.map((x) => library.has([mediaKey(x.url)]));
   const entries = (m.scan && m.scan.entries ? m.scan.entries : []).map((e) => library.has(entryKeys(e, m.scan.extractor)));
-  return { media, entries };
+  const linked = (m.linked && m.linked.groups ? m.linked.groups : []).map((g) => g.links.map((l) => library.has([mediaKey(l.url)])));
+  return { media, entries, linked };
 }
 
 function entryKeys(e, extractor) {
-  const keys = [mediaKey(e.url)];
+  const keys = [e.playlistItem ? `${mediaKey(e.url)}#${e.playlistItem}` : mediaKey(e.url)];
   if (e.id && extractor) keys.push(`${String(extractor).toLowerCase()}:${e.id}`);
   return keys;
 }
@@ -225,6 +277,15 @@ function cycleTab(b, dir) {
   b.activate(b.tabs[(i + dir + b.tabs.length) % b.tabs.length].id);
 }
 
+function rememberDir(dir) {
+  if (!dir || dir === settings().downloadDir) return settings();
+  const list = [dir, ...(settings().recentDirs || []).filter((d) => d !== dir)].slice(0, 6);
+  settingsStore.data.recentDirs = list;
+  settingsStore.save();
+  send('settings', settings());
+  return settings();
+}
+
 function openDownloadFolder() {
   const dir = settings().downloadDir;
   fs.mkdirSync(dir, { recursive: true });
@@ -287,6 +348,7 @@ function wireIpc() {
         entries = flat.map((e) => ({
           url: e.url, title: e.title, kind: 'page', media: 'unknown', pageUrl: e.url, thumbnail: e.thumbnail, duration: e.duration,
           collection: r.title || e.uploader || null, keys: entryKeys(e, r.extractor), site: siteName(url), format: opts.format,
+          playlistItem: e.playlistItem || null, root: opts.root || null,
         }));
         if (!flat.length) failed.push(url);
       } else {
@@ -325,6 +387,14 @@ function wireIpc() {
     send('settings', settings());
     return settings();
   });
+  // A download folder for one batch; remembered in the "Save in" list.
+  h('folder:choose', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Save these downloads in', defaultPath: settings().downloadDir, properties: ['openDirectory', 'createDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    rememberDir(r.filePaths[0]);
+    return r.filePaths[0];
+  });
+  h('folder:remember', (dir) => rememberDir(dir));
   h('settings:chooseFolder', async () => {
     const r = await dialog.showOpenDialog(win, { title: 'Save downloads in', defaultPath: settings().downloadDir, properties: ['openDirectory', 'createDirectory'] });
     if (r.canceled || !r.filePaths[0]) return null;
@@ -366,6 +436,7 @@ async function main() {
     store: new JsonStore(path.join(userDir(), 'queue.json'), []),
     settings, bins, library,
     getCookies: () => browser.cookies(),
+    authFor,
     userAgent: () => browser.userAgent,
     workDir: path.join(userDir(), 'work'),
   });

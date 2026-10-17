@@ -223,19 +223,32 @@ function catchRows() {
   const rows = [];
   if (!m) return rows;
   if (S.sublist) {
-    (S.sublist.entries || []).forEach((e, i) => rows.push({ type: 'entry', key: pickKey('s', e.url), e, done: S.sublist.downloaded && S.sublist.downloaded[i], extractor: S.sublist.extractor }));
+    (S.sublist.entries || []).forEach((e, i) => rows.push({ type: 'entry', key: pickKey('s', entryId(e)), e, done: S.sublist.downloaded && S.sublist.downloaded[i], extractor: S.sublist.extractor }));
   } else {
     if (m.scan && m.scan.status === 'done') {
-      m.scan.entries.forEach((e, i) => rows.push({ type: 'entry', key: pickKey('e', e.url), e, done: m.downloaded && m.downloaded.entries[i], extractor: m.scan.extractor }));
+      m.scan.entries.forEach((e, i) => rows.push({ type: 'entry', key: pickKey('e', entryId(e)), e, done: m.downloaded && m.downloaded.entries[i], extractor: m.scan.extractor }));
     }
     m.media.forEach((x, i) => rows.push({ type: 'media', key: pickKey('m', x.key), x, done: m.downloaded && m.downloaded.media[i] }));
+    const groups = m.linked && m.linked.groups ? m.linked.groups : [];
+    const listed = new Set(rows.filter((r) => r.type === 'entry').map((r) => r.e.url));
+    groups.forEach((g, gi) => g.links.forEach((l, li) => {
+      if (listed.has(l.url) || l.url === m.pageUrl) return;
+      rows.push({ type: 'linked', group: gi, label: g.label, key: pickKey('l', l.url), l, done: m.downloaded && m.downloaded.linked && m.downloaded.linked[gi] && m.downloaded.linked[gi][li] });
+    }));
   }
   for (const r of rows) {
-    const blocked = r.type === 'entry' ? r.e.isList || r.e.live : r.x.drm;
+    const blocked = r.type === 'entry' ? r.e.isList || r.e.live : r.type === 'media' ? r.x.drm : false;
     r.blocked = blocked;
-    r.on = S.picks.has(r.key) ? S.picks.get(r.key) && !blocked : !blocked && !r.done;
+    // Linked pages start unticked: a listing page can link to a lot.
+    const byDefault = r.type === 'linked' ? false : !blocked && !r.done;
+    r.on = S.picks.has(r.key) ? S.picks.get(r.key) && !blocked : byDefault;
   }
   return rows;
+}
+
+// Works of one list can share a URL, so they're told apart by their position.
+function entryId(e) {
+  return e.playlistItem ? `${e.url}#${e.playlistItem}` : e.url;
 }
 
 function defaultFolder() {
@@ -275,6 +288,9 @@ function renderCatch() {
   } else {
     const scan = m.scan || {};
     if (scan.status === 'scanning') html += `<div class="scanning"><span class="spinner"></span>Checking this page with yt-dlp…</div>`;
+    if (scan.status === 'error' && scan.error && !/No media found/.test(scan.error)) {
+      html += `<div class="group-note">Couldn't list this page's videos: ${esc(scan.error)}</div>`;
+    }
     const entries = rows.filter((r) => r.type === 'entry');
     if (entries.length) {
       const label = scan.title ? scan.title : entries.length === 1 ? 'This page' : `${entries.length} on this page`;
@@ -282,7 +298,20 @@ function renderCatch() {
     }
     const caught = rows.filter((r) => r.type === 'media');
     if (caught.length) html += groupHtml(`Playing or linked here`, caught, 'media');
-    if (!entries.length && !caught.length && scan.status !== 'scanning') {
+    const linked = rows.filter((r) => r.type === 'linked');
+    const byGroup = new Map();
+    for (const r of linked) {
+      if (!byGroup.has(r.group)) byGroup.set(r.group, []);
+      byGroup.get(r.group).push(r);
+    }
+    for (const [gi, list] of byGroup) {
+      const label = list[0].label;
+      html += groupHtml(`Linked ${label} pages (${list.length})`, list, `linked:${gi}`,
+        'Each one is a page with its own videos. Tick the ones you want; a page with several works saves them into a folder of its own.');
+    }
+    const linkedState = m.linked || {};
+    if (linkedState.status === 'checking') html += `<div class="scanning"><span class="spinner"></span>Checking the links on this page…</div>`;
+    if (!entries.length && !caught.length && !linked.length && scan.status !== 'scanning' && linkedState.status !== 'checking') {
       html += `<div class="catch-empty">
         <h3>Nothing found yet</h3>
         <p>Press play on a video or song and it'll show up here as it loads. Pages with links to audio or video files list them too.</p>
@@ -299,17 +328,29 @@ function renderCatch() {
   $('#catch-foot').hidden = !rows.length;
 }
 
-function groupHtml(label, rows, type) {
+function groupHtml(label, rows, type, note) {
   const allOn = rows.filter((r) => !r.blocked).every((r) => r.on);
   return `<div class="group">
     <div class="group-head"><span class="gt">${esc(label)}</span>
-      ${rows.length > 1 ? `<button class="btn quiet" data-all="${type}" data-on="${allOn ? 0 : 1}">${allOn ? 'Untick all' : 'Tick all'}</button>` : ''}
+      ${rows.length > 1 || type.startsWith('linked') ? `<button class="btn quiet" data-all="${type}" data-on="${allOn ? 0 : 1}">${allOn ? 'Untick all' : 'Tick all'}</button>` : ''}
     </div>
+    ${note ? `<div class="group-note">${esc(note)}</div>` : ''}
     ${rows.map(rowHtml).join('')}
   </div>`;
 }
 
 function rowHtml(r) {
+  if (r.type === 'linked') {
+    const l = r.l;
+    let path = l.url;
+    try { const u = new URL(l.url); path = u.pathname + u.search; } catch { /* keep */ }
+    return `<label class="pick${r.on ? ' on' : ''}${r.done ? ' dim' : ''}" data-key="${esc(r.key)}" title="${esc(l.url)}">
+      <input type="checkbox" ${r.on ? 'checked' : ''}>
+      <div class="thumb">${icon('link')}</div>
+      <div class="body"><div class="title">${esc(l.title || path)}</div>
+        <div class="meta">${r.done ? '<span class="tag done">Downloaded</span>' : ''}<span class="url">${esc(path)}</span></div></div>
+    </label>`;
+  }
   if (r.type === 'entry') {
     const e = r.e;
     const tags = [];
@@ -362,7 +403,10 @@ $('#catch-list').addEventListener('click', async (e) => {
   const all = e.target.closest('[data-all]');
   if (all) {
     const on = all.dataset.on === '1';
-    for (const r of catchRows()) if (r.type === all.dataset.all && !r.blocked) S.picks.set(r.key, on);
+    const [type, group] = all.dataset.all.split(':');
+    for (const r of catchRows()) {
+      if (r.type === type && !r.blocked && (group === undefined || String(r.group) === group)) S.picks.set(r.key, on);
+    }
     renderCatch();
     return;
   }
@@ -398,18 +442,21 @@ $('#catch-go').onclick = async () => {
   if (!m) return;
   const format = $('#catch-format').value;
   const collection = $('#catch-folder').value.trim() || null;
+  const root = saveInValue('#catch-dir');
   const items = [];
   for (const r of catchRows()) {
     if (!r.on) continue;
     if (r.type === 'entry') {
       const e = r.e;
-      items.push({ url: e.url, title: e.title, kind: 'page', pageUrl: e.url, thumbnail: e.thumbnail, duration: e.duration, collection, format, id: e.id, extractor: r.extractor, site: m.site });
+      items.push({ url: e.url, title: e.title, kind: 'page', pageUrl: e.url, thumbnail: e.thumbnail, duration: e.duration, collection, format, id: e.id, extractor: r.extractor, site: m.site, playlistItem: e.playlistItem || null, root });
+    } else if (r.type === 'linked') {
+      items.push({ url: r.l.url, title: r.l.title || r.l.url, kind: 'page', pageUrl: r.l.url, collection, format, site: m.site, multi: true, root });
     } else {
       const x = r.x;
       const name = itemName(x, m.pageTitle);
       items.push({
         url: x.url, kind: x.kind, media: x.media, title: name, name, pageUrl: x.pageUrl || m.pageUrl, headers: x.headers,
-        size: x.size, duration: x.duration, thumbnail: x.poster, collection, format, site: m.site,
+        size: x.size, duration: x.duration, thumbnail: x.poster, collection, format, site: m.site, root,
       });
     }
   }
@@ -423,6 +470,43 @@ $('#catch-go').onclick = async () => {
   for (const row of catchRows()) if (row.on) S.picks.set(row.key, false);
   renderCatch();
 };
+
+// ---------- where downloads go ----------
+
+const CHOOSE = '\u0000choose';
+function shortDir(d) {
+  const parts = String(d).split(/[\\/]/).filter(Boolean);
+  return parts.length > 2 ? `…${S.platform === 'win32' ? '\\' : '/'}${parts.slice(-2).join(S.platform === 'win32' ? '\\' : '/')}` : d;
+}
+/** Fill a "Save in" list: the default folder, recent ones, and a way to pick another. */
+function renderSaveIn(sel) {
+  const el = $(sel);
+  const cur = el.dataset.value || '';
+  const dirs = (S.settings.recentDirs || []).filter((d) => d !== S.settings.downloadDir);
+  el.innerHTML = `<option value="">${esc(shortDir(S.settings.downloadDir))} (default)</option>` +
+    dirs.map((d) => `<option value="${esc(d)}" title="${esc(d)}">${esc(shortDir(d))}</option>`).join('') +
+    `<option value="${CHOOSE}">Choose a folder…</option>`;
+  el.value = dirs.includes(cur) ? cur : '';
+  el.dataset.value = el.value;
+  el.title = el.value || S.settings.downloadDir;
+}
+function saveInValue(sel) {
+  return $(sel).dataset.value || null;
+}
+for (const sel of ['#catch-dir', '#addlinks-dir']) {
+  $(sel).addEventListener('change', async (e) => {
+    const el = e.target;
+    let value = el.value;
+    if (value === CHOOSE) {
+      const dir = await bdl.invoke('folder:choose');
+      value = dir || el.dataset.value || '';
+      if (dir && dir !== S.settings.downloadDir) S.settings.recentDirs = [dir, ...(S.settings.recentDirs || []).filter((d) => d !== dir)];
+    }
+    el.dataset.value = value;
+    renderSaveIn('#catch-dir');
+    renderSaveIn('#addlinks-dir');
+  });
+}
 
 // ---------- queue ----------
 
@@ -465,7 +549,7 @@ function queueStateText(i) {
     }
     case 'queued': return 'Waiting';
     case 'paused': return i.progress ? `Paused at ${Math.floor(i.progress * 100)}%` : 'Paused';
-    case 'done': return `Done${i.size ? `, ${fmtSize(i.size)}` : ''}`;
+    case 'done': return `Done${i.files && i.files.length > 1 ? `, ${i.files.length} files` : ''}${i.size ? `, ${fmtSize(i.size)}` : ''}`;
     case 'failed': return 'Failed';
     case 'stopped': return 'Stopped';
     default: return esc(i.status);
@@ -566,7 +650,7 @@ $('#addlinks').onsubmit = async (e) => {
   go.disabled = true;
   go.textContent = 'Looking up links…';
   try {
-    const r = await bdl.invoke('queue:addLinks', text, { format: $('#addlinks-format').value, force: $('#addlinks-force').checked });
+    const r = await bdl.invoke('queue:addLinks', text, { format: $('#addlinks-format').value, force: $('#addlinks-force').checked, root: saveInValue('#addlinks-dir') });
     const parts = [];
     if (r.added) parts.push(`Added ${r.added}`);
     if (r.already) parts.push(`${r.already} already in your library`);
@@ -656,7 +740,7 @@ function libRowHtml(r) {
     <input type="checkbox" ${S.lib.sel.has(r.id) ? 'checked' : ''} aria-label="Select">
     <div class="thumb" data-act="play" title="Play">${thumb}</div>
     <div class="main"><div class="title" title="${esc(r.file)}">${esc(r.title)}</div>
-      <div class="sub">${r.missing ? 'File missing' : esc([ext, fmtDur(r.duration), fmtSize(r.size)].filter(Boolean).join('  '))}</div></div>
+      <div class="sub">${r.missing ? 'File missing' : esc([r.album, ext, fmtDur(r.duration), fmtSize(r.size)].filter(Boolean).join('  '))}</div></div>
     <div class="info">${fmtWhen(r.addedAt)}</div>
     <div class="acts">${b('play', 'play', 'Play')}${b('reveal', 'folder', 'Show in folder')}${r.pageUrl ? b('page', 'link', 'Open the page it came from') : ''}${b('rename', 'pencil', 'Rename')}${b('move', 'move', 'Move to folder')}</div>
   </div>`;
@@ -795,6 +879,8 @@ function renderSettings() {
   else if (s.layout === 'collection') parts.push('Some playlist');
   parts.push('A video [id].mp4');
   $('#s-preview').textContent = parts.join(sep);
+  renderSaveIn('#catch-dir');
+  renderSaveIn('#addlinks-dir');
   for (const sel of ['#catch-format', '#addlinks-format']) {
     const el = $(sel);
     const cur = el.value || s.format;

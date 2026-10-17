@@ -225,3 +225,87 @@ test('finds the saved file even when the printed path is garbled', () => {
   assert.equal(locateSaved({ pathFile, printed: garbled, homeDir: dir, startedAt: 0 }), null);
   assert.equal(locateSaved({ pathFile, printed: garbled, homeDir: path.join(dir, 'nope'), startedAt: 0 }), null);
 });
+
+test('reads site login tokens', () => {
+  const SA = require('../src/main/siteauth');
+  const jwt = (payload) => `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`;
+  const fresh = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+  const stale = jwt({ exp: Math.floor(Date.now() / 1000) - 10 });
+  assert.equal(SA.siteFor('https://www.digitalconcerthall.com/en/concert/53785').id, 'dch');
+  assert.equal(SA.siteFor('https://digitalconcerthall.com/en/'), SA.SITES[0]);
+  assert.equal(SA.siteFor('https://example.com/'), null);
+  assert.equal(SA.cleanToken(fresh), fresh);
+  assert.equal(SA.cleanToken(JSON.stringify(fresh)), fresh);
+  assert.equal(SA.cleanToken(JSON.stringify({ access_token: fresh })), fresh);
+  assert.equal(SA.cleanToken('null'), null);
+  assert.equal(SA.cleanToken('not a token'), null);
+  assert.equal(SA.tokenFresh(fresh), true);
+  assert.equal(SA.tokenFresh(stale), false);
+  assert.equal(SA.netrcText('digitalconcerthall', 'token', fresh), `machine digitalconcerthall login token password ${fresh}\n`);
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bdl-')), 'netrc');
+  const args = SA.writeNetrc(f, SA.SITES[0], fresh);
+  assert.deepEqual(args, ['--netrc', '--netrc-location', f, '--no-cache-dir']);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(f).mode & 0o777, 0o600);
+});
+
+test('works without their own page are downloaded as item N of the list', () => {
+  const concert = 'https://www.digitalconcerthall.com/en/concert/53785';
+  const r = Y.scanResultToEntries({
+    _type: 'playlist', id: '53785', title: 'Kirill Petrenko conducts Mendelssohn', extractor_key: 'DigitalConcertHall', webpage_url: concert,
+    entries: [
+      { id: '53785-1', title: 'Interview', formats: [{}], url: 'https://cdn/x/1.m3u8', webpage_url: concert, duration: 300 },
+      { id: '53785-2', title: 'Mendelssohn: Symphony No. 3', format_id: 'hls-1080', url: 'https://cdn/x/2.m3u8', playlist_index: 2 },
+    ],
+  }, concert);
+  assert.deepEqual(r.entries.map((e) => [e.url, e.playlistItem, e.title]), [
+    [concert, 1, 'Interview'],
+    [concert, 2, 'Mendelssohn: Symphony No. 3'],
+  ]);
+  const a = Y.downloadArgs({ url: concert, format: 'best', homeDir: '/d', tempDir: '/t', outName: 'x', playlistItem: 2 });
+  assert.ok(a.includes('--playlist-items') && a[a.indexOf('--playlist-items') + 1] === '2');
+  assert.ok(!a.includes('--no-playlist'));
+  const multi = Y.downloadArgs({ url: concert, format: 'best', homeDir: '/d', tempDir: '/t', outName: Y.MULTI_OUTNAME, multi: true, authArgs: ['--netrc'] });
+  assert.ok(!multi.includes('--no-playlist') && !multi.includes('--playlist-items'));
+  assert.ok(multi.indexOf('--netrc') < multi.indexOf('--'));
+  assert.ok(Y.downloadArgs({ url: 'https://x/v', format: 'best', homeDir: '/d', tempDir: '/t', outName: 'x' }).includes('--no-playlist'));
+});
+
+test('checks many links in one run', () => {
+  const urls = ['https://www.digitalconcerthall.com/en/concert/1', 'https://www.digitalconcerthall.com/en/artist/x'];
+  const a = Y.linkCheckArgs({ urls, siteOnly: true, cookieFile: '/c', authArgs: ['--netrc', '--netrc-location', '/n'] });
+  assert.deepEqual(a.slice(-3), ['--', ...urls]);
+  assert.ok(a.includes('default,-generic') && a.includes('/n'));
+  const out = 'junk\nBDL_OK https://www.digitalconcerthall.com/en/concert/1\nBDL_OK https://other/\n';
+  assert.deepEqual([...Y.recognisedLinks(out, urls)], [urls[0]]);
+});
+
+test('lists every file a multi-work download saved', () => {
+  const { savedFiles } = require('../src/main/queue');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bdl-'));
+  const a = path.join(dir, '01 Interview [1].mp4');
+  const b = path.join(dir, '02 Symphony “Scottish” [2].mp4');
+  fs.writeFileSync(a, 'x');
+  fs.writeFileSync(b, 'x');
+  const pf = path.join(dir, 'saved.txt');
+  fs.writeFileSync(pf, [JSON.stringify({ filepath: a, title: 'Interview', id: '1' }), JSON.stringify({ filepath: b, title: 'Symphony' }), JSON.stringify({ filepath: a }), JSON.stringify({ filepath: path.join(dir, 'gone.mp4') }), 'not json {'].join('\n'));
+  assert.deepEqual(savedFiles(pf).map((f) => f.filepath), [a, b]);
+  assert.deepEqual(savedFiles(path.join(dir, 'missing.txt')), []);
+});
+
+test('groups a page\'s links by shape', () => {
+  const page = 'https://www.digitalconcerthall.com/en/concerts?season=2024';
+  const g = D.groupLinks([
+    { url: 'https://www.digitalconcerthall.com/en/concert/53785', text: 'Petrenko – Mendelssohn' },
+    { url: 'https://www.digitalconcerthall.com/en/concert/53201#top', text: 'Magic Night' },
+    { url: 'https://www.digitalconcerthall.com/en/concert/53785', text: null },
+    { url: 'https://digitalconcerthall.com/en/artist/simon-rattle', text: 'Simon Rattle' },
+    { url: 'https://www.digitalconcerthall.com/en/', text: 'Home' },
+    { url: 'https://www.digitalconcerthall.com/', text: 'Home' },
+    { url: page, text: 'This page' },
+    { url: 'https://elsewhere.com/en/concert/1', text: 'Other site' },
+  ], page);
+  assert.deepEqual(g.map((x) => [x.pattern, x.label, x.links.length]), [['/en/concert/*', 'concert', 2], ['/en/artist/*', 'artist', 1]]);
+  assert.equal(g[0].links[1].url, 'https://www.digitalconcerthall.com/en/concert/53201');
+  const yt = D.groupLinks([{ url: 'https://www.youtube.com/watch?v=a', text: 'A' }, { url: 'https://www.youtube.com/watch?v=b' }], 'https://www.youtube.com/');
+  assert.deepEqual(yt.map((x) => [x.pattern, x.links.length]), [['/watch?v=*', 2]]);
+});
