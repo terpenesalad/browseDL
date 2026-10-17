@@ -201,3 +201,27 @@ test('picks a free file name', () => {
   assert.equal(uniqueBase(dir, 'song', { id: 'x' }), 'song (3)');
   assert.equal(uniqueBase(dir, 'Other', { id: 'x' }, new Set([path.join(dir, 'other').toLowerCase()])), 'Other (2)');
 });
+
+test('finds the saved file even when the printed path is garbled', () => {
+  const { locateSaved } = require('../src/main/queue');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bdl-'));
+  const real = path.join(dir, 'Emmanuelle Haïm conducts Handel – “Live” [abc123].mp4');
+  fs.writeFileSync(real, 'x');
+  fs.writeFileSync(path.join(dir, 'Other [zzz].mp4'), 'x');
+  fs.writeFileSync(path.join(dir, 'Partial [p].mp4.part'), 'x');
+  const garbled = path.join(dir, 'Emmanuelle HaÃ¯m conducts Handel â€“ â€œLiveâ€\x9d [abc123].mp4');
+  const pathFile = path.join(dir, 'saved.txt');
+  // 1. The UTF-8 path file wins.
+  fs.writeFileSync(pathFile, real + '\n', 'utf8');
+  assert.equal(locateSaved({ pathFile, printed: garbled, homeDir: dir, startedAt: 0 }), real);
+  // 2. No path file: the video's [id] finds it.
+  fs.unlinkSync(pathFile);
+  assert.equal(locateSaved({ pathFile, printed: garbled, homeDir: dir, startedAt: 0, videoId: 'abc123' }), real);
+  // 3. Direct downloads are found by the name browseDL chose.
+  const named = path.join(dir, 'Theme – “tune”.mp3');
+  fs.writeFileSync(named, 'x');
+  assert.equal(locateSaved({ pathFile, printed: garbled, homeDir: dir, startedAt: 0, base: 'Theme – “tune”' }), named);
+  // 4. Otherwise only an unambiguous new file counts.
+  assert.equal(locateSaved({ pathFile, printed: garbled, homeDir: dir, startedAt: 0 }), null);
+  assert.equal(locateSaved({ pathFile, printed: garbled, homeDir: path.join(dir, 'nope'), startedAt: 0 }), null);
+});

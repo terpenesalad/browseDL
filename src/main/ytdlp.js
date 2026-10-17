@@ -51,6 +51,7 @@ const PROGRESS_TEMPLATE =
  * @param {object} [o.headers]  extra request headers, e.g. Referer
  * @param {string} [o.ffmpegDir]
  * @param {boolean} [o.isDirect] a media file or stream URL rather than a web page
+ * @param {string} [o.pathFile] yt-dlp writes the saved file's path here (UTF-8)
  */
 function downloadArgs(o) {
   const a = [
@@ -59,6 +60,7 @@ function downloadArgs(o) {
     '--progress-template', 'postprocess:BDL_PP %(progress.status)s|%(progress.postprocessor)s',
     '--print', 'video:BDL_META %(.{title,id,format_id,extractor_key,duration,thumbnail,webpage_url,ext,uploader,playlist_title})j',
     '--print', 'after_move:BDL_FILE %(filepath)s',
+    '--encoding', 'utf-8',
     '--no-mtime', '--no-playlist', '--no-overwrites', '--continue',
     '--retries', '10', '--fragment-retries', '10', '--concurrent-fragments', '4',
     '--embed-metadata',
@@ -68,6 +70,7 @@ function downloadArgs(o) {
     ...formatArgs(o.format),
   ];
   if ((o.format === 'mp3' || o.format === 'm4a') && !o.isDirect) a.push('--embed-thumbnail');
+  if (o.pathFile) a.push('--print-to-file', 'after_move:%(filepath)s', o.pathFile.replace(/%/g, '%%'));
   if (o.ffmpegDir) a.push('--ffmpeg-location', o.ffmpegDir);
   if (o.cookiesFromBrowser) a.push('--cookies-from-browser', o.cookiesFromBrowser);
   else if (o.cookieFile) a.push('--cookies', o.cookieFile);

@@ -110,10 +110,16 @@ async function selfTest({ bins }) {
     const jobs = [
       { name: 'Logged-in video', url: `${base}/private/clip.mp4`, kind: 'file', media: 'video', format: 'best', expect: { video: true, audio: true } },
       { name: 'Logged-in audio as MP3', url: `${base}/private/clip.mp4?as=mp3`, kind: 'file', media: 'video', format: 'mp3', expect: { video: false, audio: true, ext: '.mp3' } },
+      // Accents, curly quotes and a very long path: Windows once reported files like this as failed.
+      {
+        name: 'Emmanuelle Haïm conducts Handel – “Résurrection” at the Festspielhaus Baden-Baden, with Le Concert d’Astrée and a deliberately long title to test paths',
+        collection: 'Daniel Harding conducts Mahler’s “Resurrection Symphony” – Orchestre de Paris – a long folder name for testing',
+        url: `${base}/private/clip.mp4?as=unicode`, kind: 'file', media: 'video', format: 'best', expect: { video: true, audio: true },
+      },
       { name: 'HLS stream', url: `${base}/private/hls/index.m3u8`, kind: 'hls', media: 'video', format: 'best', expect: { video: true, audio: true } },
       { name: 'DASH picture and sound joined', url: `${base}/dash/manifest.mpd`, kind: 'dash', media: 'video', format: 'best', expect: { video: true, audio: true } },
     ];
-    const r = queue.add(jobs.map((j) => ({ ...j, title: j.name, pageUrl: `${base}/page.html`, collection: 'Self test' })), { force: true });
+    const r = queue.add(jobs.map((j) => ({ ...j, title: j.name, pageUrl: `${base}/page.html`, collection: j.collection || 'Self test' })), { force: true });
     if (r.added !== jobs.length) throw new Error(`Only ${r.added} of ${jobs.length} test downloads were queued`);
 
     await new Promise((resolve, reject) => {

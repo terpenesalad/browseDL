@@ -198,11 +198,13 @@ class Queue extends EventEmitter {
 
     const isDirect = item.kind !== 'page';
     let outName;
+    let directBase = null;
     if (isDirect) {
       const base = safeName(item.name || item.title, 'Download', 150);
       const taken = new Set([...this.reserved.values()]);
       const unique = uniqueBase(homeDir, base, item, taken);
       this.reserved.set(item.id, path.join(homeDir, unique).toLowerCase());
+      directBase = unique;
       outName = templateLiteral(unique);
     } else {
       outName = '%(title).150B [%(id)s]';
@@ -226,13 +228,18 @@ class Queue extends EventEmitter {
       this.pump();
       return;
     }
+    // yt-dlp also writes the saved file's path here, always as UTF-8, because on Windows the
+    // path it prints can come back garbled when titles have accents or curly quotes.
+    const pathFile = path.join(this.workDir, `saved-${item.id}.txt`);
+    rm(pathFile);
     const args = Y.downloadArgs({
       url: item.url, format: item.format, homeDir, tempDir, outName, cookieFile, cookiesFromBrowser,
-      userAgent: this.userAgent(), headers: item.headers, ffmpegDir: this.bins.ffmpegDir, isDirect,
+      userAgent: this.userAgent(), headers: item.headers, ffmpegDir: this.bins.ffmpegDir, isDirect, pathFile,
     });
 
     const tracker = new Y.ProgressTracker();
     let file = null;
+    let videoId = null;
     let lastError = null;
     const errors = [];
     const onLine = (line) => {
@@ -245,6 +252,7 @@ class Queue extends EventEmitter {
         if (m.thumbnail && !item.thumbnail) item.thumbnail = m.thumbnail;
         if (m.duration) item.duration = m.duration;
         if (m.extractor_key) item.extractor = m.extractor_key;
+        if (m.id) videoId = String(m.id);
         if (m.id && m.extractor_key && !isDirect) {
           const k = `${String(m.extractor_key).toLowerCase()}:${m.id}`;
           if (!item.keys.includes(k)) item.keys.push(k);
@@ -283,6 +291,10 @@ class Queue extends EventEmitter {
     if (cookieFile) rm(cookieFile);
     this.procs.delete(item.id);
     this.reserved.delete(item.id);
+    if (!slot.intent && result.code === 0) {
+      file = locateSaved({ pathFile, printed: file, homeDir, startedAt: item.startedAt, videoId: isDirect ? null : videoId, base: directBase });
+    }
+    rm(pathFile);
 
     if (slot.intent) {
       // Paused, stopped or app closing: _halt already set the status.
@@ -304,7 +316,7 @@ class Queue extends EventEmitter {
     } else if (result.error) {
       this._fail(item, `Couldn't start the downloader: ${result.error.message}`);
     } else if (result.code === 0 && !file) {
-      this._fail(item, lastError ? Y.friendlyError(lastError) : 'Nothing was downloaded. The page may not have any media yt-dlp can save.');
+      this._fail(item, lastError ? Y.friendlyError(lastError) : `The download finished, but browseDL couldn't find the saved file. Check ${homeDir}`);
     } else {
       this._fail(item, Y.friendlyError(lastError || errors.join(' ') || `The downloader stopped (code ${result.code}).`));
     }
@@ -384,6 +396,40 @@ class Queue extends EventEmitter {
   }
 }
 
+/**
+ * Find the file yt-dlp just saved: from the UTF-8 path file, then the printed path, then by
+ * looking in the folder for the video's [id] or the chosen name, or a file that just appeared.
+ */
+function locateSaved({ pathFile, printed, homeDir, startedAt, videoId, base }) {
+  const exists = (f) => { try { return !!f && fs.statSync(f).isFile(); } catch { return false; } };
+  try {
+    const lines = fs.readFileSync(pathFile, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    for (const l of lines.reverse()) if (exists(l)) return l;
+  } catch { /* yt-dlp didn't write it */ }
+  if (exists(printed)) return printed;
+  let names = [];
+  try { names = fs.readdirSync(homeDir); } catch { return null; }
+  const files = names
+    .filter((n) => !n.startsWith('.') && !/\.(part|ytdl|temp|tmp)$/i.test(n) && !/\.part-Frag\d+/i.test(n))
+    .map((n) => {
+      const full = path.join(homeDir, n);
+      try { const st = fs.statSync(full); return st.isFile() ? { n, full, t: st.mtimeMs } : null; } catch { return null; }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.t - a.t);
+  const noExt = (n) => n.replace(/\.[^.]+$/, '');
+  if (videoId) {
+    const hit = files.find((f) => noExt(f.n).endsWith(`[${videoId}]`));
+    if (hit) return hit.full;
+  }
+  if (base) {
+    const hit = files.find((f) => noExt(f.n).normalize('NFC').toLowerCase() === base.normalize('NFC').toLowerCase());
+    if (hit) return hit.full;
+  }
+  const fresh = files.filter((f) => f.t >= (startedAt || 0) - 2000);
+  return fresh.length === 1 ? fresh[0].full : null;
+}
+
 function publicItem(i) {
   const { headers, keys, ...rest } = i;
   return rest;
@@ -411,4 +457,4 @@ function rmrf(d) {
   try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 3 }); } catch { /* ignore */ }
 }
 
-module.exports = { Queue, uniqueBase };
+module.exports = { Queue, uniqueBase, locateSaved };
